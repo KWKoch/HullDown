@@ -1,0 +1,190 @@
+class_name Gunnery
+extends Node
+## Fire control for a ship's main battery. Each turret is its own Compartment, so a
+## destroyed turret stops firing and a damaged one reloads slower. Solutions are found by
+## integrating the same ballistics Shell uses, so aiming accounts for drag and gravity.
+
+var ship: Ship
+var gun: Dictionary
+var reload_left := {}        ## Compartment -> seconds until ready
+var dispersion_deg := 0.35   ## 1-sigma angular scatter at full health
+
+
+func setup(p_ship: Ship) -> void:
+	ship = p_ship
+	var entry := Roster.get_entry(ship.class_id)
+	gun = entry.get("main_gun", {})
+	for t in ship.gun_turrets():
+		reload_left[t] = randf() * 3.0
+
+
+func max_range() -> float:
+	return float(gun.get("range_m", 0.0))
+
+
+func _physics_process(delta: float) -> void:
+	for t in reload_left:
+		reload_left[t] = maxf(0.0, reload_left[t] - delta)
+
+
+## Fires every ready turret at `target_pos` (world). `target_vel` leads a moving target.
+func fire_at(target_pos: Vector3, target_vel: Vector3) -> int:
+	if gun.is_empty() or ship.sunk:
+		return 0
+	var fired := 0
+	for t in reload_left:
+		var turret: Compartment = t
+		if not turret.is_functional() or reload_left[t] > 0.0:
+			continue
+		var muzzle := ship.to_global(turret.center + Vector3(0, 2.0, 0))
+		var aim := _lead(muzzle, target_pos, target_vel)
+		if aim == Vector3.ZERO:
+			continue
+		var barrels: int = gun.get("barrels_per_turret", 1)
+		for b in barrels:
+			_spawn_shell(muzzle, aim, turret)
+		# A damaged turret reloads slower; rpm is per barrel salvo.
+		var base := 60.0 / float(gun.get("rpm", 2.0))
+		reload_left[t] = base * (1.0 + (1.0 - turret.health_fraction()) * 1.5)
+		fired += 1
+	return fired
+
+
+func _lead(muzzle: Vector3, target: Vector3, tvel: Vector3) -> Vector3:
+	var v0: float = gun["muzzle_ms"]
+	var t_guess := muzzle.distance_to(target) / (v0 * 0.8)
+	var aim_pt := target
+	for i in 3:
+		aim_pt = target + tvel * t_guess
+		t_guess = _time_of_flight(muzzle, aim_pt, v0)
+		if t_guess < 0.0:
+			return Vector3.ZERO
+	var elev := _solve_elevation(muzzle, aim_pt, v0)
+	if elev < 0.0:
+		return Vector3.ZERO
+	var flat := Vector3(aim_pt.x - muzzle.x, 0.0, aim_pt.z - muzzle.z)
+	var bearing := atan2(flat.x, flat.z)
+	return Vector3(sin(bearing) * cos(elev), sin(elev), cos(bearing) * cos(elev))
+
+
+func _solve_elevation(from: Vector3, to: Vector3, v0: float) -> float:
+	var flat := Vector2(to.x - from.x, to.z - from.z).length()
+	var lo := 0.0
+	var hi := deg_to_rad(40.0)
+	var best := -1.0
+	for _i in 14:
+		var mid := (lo + hi) * 0.5
+		var r := _range_at_height(mid, v0, to.y - from.y)
+		if r < 0.0:
+			return -1.0
+		if r < flat:
+			lo = mid
+		else:
+			hi = mid
+		best = mid
+	if _range_at_height(best, v0, to.y - from.y) < flat * 0.97:
+		return -1.0
+	return best
+
+
+func _time_of_flight(from: Vector3, to: Vector3, v0: float) -> float:
+	var el := _solve_elevation(from, to, v0)
+	if el < 0.0:
+		return -1.0
+	var flat := Vector2(to.x - from.x, to.z - from.z).length()
+	return flat / (v0 * cos(el) * 0.85)
+
+
+## Horizontal distance travelled when the shell first descends through dy.
+func _range_at_height(elev: float, v0: float, dy: float) -> float:
+	var pos := Vector2.ZERO
+	var vel := Vector2(cos(elev), sin(elev)) * v0
+	var dt := 0.2
+	for _s in 600:
+		var sp := vel.length()
+		vel += Vector2(0, -Shell.GRAVITY) * dt
+		vel -= vel * sp * Shell.DRAG_K * dt
+		var np := pos + vel * dt
+		if vel.y < 0.0 and np.y <= dy:
+			var t := (pos.y - dy) / maxf(pos.y - np.y, 0.0001)
+			return pos.x + (np.x - pos.x) * t
+		pos = np
+	return -1.0
+
+
+## Integrates the same ballistics Shell uses and returns the path as world points,
+## ending where the shell reaches the water (y <= 0).
+func predict_path(muzzle: Vector3, dir: Vector3) -> Array[Vector3]:
+	var pts: Array[Vector3] = [muzzle]
+	var pos := muzzle
+	var vel := dir.normalized() * float(gun["muzzle_ms"])
+	for i in 700:
+		var dt := 0.04 if i < 50 else 0.25     # fine steps near the guns: point-blank shots matter
+		var sp := vel.length()
+		vel += Vector3(0, -Shell.GRAVITY, 0) * dt
+		vel -= vel * sp * Shell.DRAG_K * dt
+		pos += vel * dt
+		pts.append(pos)
+		if pos.y <= 0.0:
+			break
+	return pts
+
+
+## Fire-safety check. Returns false if the shell's flight (or its splash area) crosses a
+## friendly ship low enough to hit it. Shells passing above the masts are fine, which is
+## why long, high-arc shots are rarely blocked but flat close-range ones often are.
+## `offsets` maps Ship -> Vector3: the captain's (imperfect) error in where he believes each
+## friendly ship is.
+func clear_of_friendlies(target_pos: Vector3, target_vel: Vector3, offsets: Dictionary, uncertainty_m: float = 0.0) -> bool:
+	if gun.is_empty():
+		return true
+	var live: Array[Compartment] = []
+	for t in reload_left:
+		if (t as Compartment).is_functional():
+			live.append(t)
+	if live.is_empty():
+		return true
+	var sample: Array[Compartment] = [live[0]]
+	if live.size() > 2:
+		sample.append(live[live.size() / 2])
+	if live.size() > 1:
+		sample.append(live[live.size() - 1])
+	var spread := tan(deg_to_rad(dispersion_deg) * 2.0)     # lateral miss per metre of range
+	var paths: Array = []                                    # [muzzle, path] per sampled turret
+	for turret in sample:
+		var muzzle := ship.to_global(turret.center + Vector3(0, 2.0, 0))
+		var aim := _lead(muzzle, target_pos, target_vel)
+		if aim != Vector3.ZERO:
+			paths.append([muzzle, predict_path(muzzle, aim)])
+	if paths.is_empty():
+		return true
+	for n in ship.get_tree().get_nodes_in_group("ships"):
+		var f := n as Ship
+		if f == null or f == ship or f.sunk or f.team != ship.team:
+			continue
+		var believed := f.global_position + (offsets.get(f, Vector3.ZERO) as Vector3)
+		var half_len := f.length_m * 0.5
+		for entry in paths:
+			var muzzle: Vector3 = entry[0]
+			for p in (entry[1] as Array):
+				if p.y > 45.0 or p.y < -f.draft_m:
+					continue                                    # over the masts / under the water
+				var horiz := Vector2(p.x - believed.x, p.z - believed.z).length()
+				var range_from_gun := Vector2(p.x - muzzle.x, p.z - muzzle.z).length()
+				if horiz < half_len + 25.0 + uncertainty_m * 1.5 + range_from_gun * spread:
+					return false
+	return true
+
+
+func _spawn_shell(muzzle: Vector3, dir: Vector3, turret: Compartment) -> void:
+	var spread := deg_to_rad(dispersion_deg) * (1.0 + (1.0 - turret.health_fraction()))
+	var d := dir
+	d = d.rotated(Vector3.UP, randfn(0.0, spread))
+	d = d.rotated(d.cross(Vector3.UP).normalized(), randfn(0.0, spread * 0.6))
+	var shell := Shell.new()
+	var spec := {
+		"caliber_mm": gun["caliber_mm"], "shell_kg": gun["shell_kg"], "muzzle_ms": gun["muzzle_ms"],
+		"he_kg": float(gun["shell_kg"]) * 0.06, "fuse_m": 6.0 if float(gun["caliber_mm"]) > 150.0 else 2.0,
+	}
+	ship.get_tree().current_scene.add_child(shell)
+	shell.launch(ship, ship.terrain as BattleTerrain, muzzle, d, spec)
