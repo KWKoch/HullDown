@@ -50,8 +50,6 @@ var _schematic: Control
 var _alert_box: VBoxContainer
 var _log_box: VBoxContainer
 var _log: Array = []                  ## [text, color, age]
-var _turret_box: VBoxContainer
-var _turret_bars: Array[ProgressBar] = []
 var _fire_state: Dictionary = {}      ## compartment id -> bool, for edge-detecting events
 var _flood_state: Dictionary = {}
 var _t := 0.0
@@ -134,6 +132,26 @@ func _row(box: VBoxContainer, key: String, caption: String, accent: Color) -> vo
 	_values[key] = v
 
 
+## A small status tag (e.g. "PROP 100%") that sits above a control gauge; returns its value label.
+func _gauge_tag(pos: Vector2, width: float, caption: String) -> Label:
+	var pc := PanelContainer.new()
+	pc.add_theme_stylebox_override("panel", _style(C_ENG))
+	pc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(pc)
+	pc.position = pos
+	pc.custom_minimum_size = Vector2(width, 0)
+	var h := HBoxContainer.new()
+	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pc.add_child(h)
+	var k := _label(caption, 12, C_DIM)
+	h.add_child(k)
+	var v := _label("-", 14, C_TEXT)
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	h.add_child(v)
+	return v
+
+
 func _build() -> void:
 	_plates = Control.new()
 	_plates.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -145,34 +163,33 @@ func _build() -> void:
 	_reticle.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_reticle.draw.connect(_draw_reticle)
 	add_child(_reticle)
-	# NAVIGATION (top-left, teal)
-	var nav := _panel("NAVIGATION", C_NAV, Control.PRESET_TOP_LEFT, Vector2(14, 14), 330)
-	var name_l := _label("", 17, C_TEXT)
-	nav.add_child(name_l)
-	_values["name"] = name_l
-	_row(nav, "speed", "SPEED", C_NAV)
-	_row(nav, "heading", "HEADING", C_NAV)
-	_row(nav, "rudder", "RUDDER", C_NAV)
-	_row(nav, "depth", "UNDER KEEL", C_NAV)
-
-	# ENGINEERING (below navigation, amber)
-	var eng := _panel("ENGINEERING", C_ENG, Control.PRESET_TOP_LEFT, Vector2(14, 262), 330)
-	_row(eng, "order", "ORDERED", C_ENG)
-	_row(eng, "answer", "ENGINES", C_ENG)
-	_row(eng, "prop", "PROPULSION", C_ENG)
-	_row(eng, "steer", "STEERING", C_ENG)
-
-	# WEAPONS (top-right, red)
-	var wep := _panel("WEAPONS", C_WEP, Control.PRESET_TOP_RIGHT, Vector2(-364, 14), 350)
-	_row(wep, "battery", "MAIN BATTERY", C_WEP)
-	_turret_box = VBoxContainer.new()
-	_turret_box.add_theme_constant_override("separation", 3)
-	_turret_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	wep.add_child(_turret_box)
-	_row(wep, "hostiles", "CONTACTS", C_WEP)
-	_row(wep, "nearest", "NEAREST", C_WEP)
-	_row(wep, "aim", "AIM RANGE", C_WEP)
-	_row(wep, "bearing", "BATTERY", C_WEP)
+	# Navigation strip, centred under the compass: speed, heading, rudder, water under the keel.
+	var strip := PanelContainer.new()
+	strip.add_theme_stylebox_override("panel", _style(C_NAV))
+	strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(strip)
+	strip.position = Vector2(960.0 - 260.0, 62)
+	strip.custom_minimum_size = Vector2(520, 0)
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 6)
+	hb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	strip.add_child(hb)
+	for it in [["speed", "SPEED"], ["heading", "HDG"], ["rudder", "RUDDER"], ["depth", "KEEL"]]:
+		var cell := VBoxContainer.new()
+		cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		cell.add_theme_constant_override("separation", 0)
+		cell.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var cap := _label(it[1], 12, C_DIM)
+		cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		cell.add_child(cap)
+		var val := _label("-", 18, C_TEXT)
+		val.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		cell.add_child(val)
+		hb.add_child(cell)
+		_values[it[0]] = val
+	# Damage readouts above the engine telegraph and the helm.
+	_values["prop"] = _gauge_tag(Vector2(960.0 - 170.0, 1080.0 - 12.0 - 190.0 - 34.0), 100.0, "PROP")
+	_values["steer"] = _gauge_tag(Vector2(960.0 - 170.0 + 110.0, 1080.0 - 12.0 - 68.0 - 34.0), 230.0, "STEER")
 
 	# DAMAGE CONTROL (right, blue) with the ship schematic
 	var dmg := _panel("DAMAGE CONTROL", C_DMG, Control.PRESET_TOP_RIGHT, Vector2(-364, 330), 350)
@@ -196,7 +213,7 @@ func _build() -> void:
 	_compass.draw.connect(_draw_compass)
 	add_child(_compass)
 	_alert_box = VBoxContainer.new()
-	_alert_box.position = Vector2(1920.0 * 0.5 - 230.0, 64)
+	_alert_box.position = Vector2(1920.0 * 0.5 - 230.0, 140)
 	_alert_box.custom_minimum_size = Vector2(460, 0)
 	_alert_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_alert_box)
@@ -312,12 +329,16 @@ func _build_controls() -> void:
 	_helm.setup("HELM  A/D  X", false, hl, hc, controls.helm_ordered)
 	_helm.picked.connect(func(i: int) -> void: controls.set_helm(i))
 	_ui_controls.append(_helm)
-	# Fire and camera on the lower right.
+	# Fire button: touch screens only (on a PC the left mouse button fires). Camera sits above it on
+	# touch, and drops to the corner on PC.
+	var touch := DisplayServer.is_touchscreen_available() or OS.get_cmdline_user_args().has("--touchui")
 	_fire_button = _btn("FIRE\nMAIN BATTERY", Vector2(190, 120), Vector2(1920.0 - 14.0 - 190.0, 1080.0 - 14.0 - 120.0), C_WEP)
+	if not touch:
+		_fire_button.visible = false
 	_fire_button.add_theme_font_size_override("font_size", 20)
 	_fire_button.button_down.connect(func() -> void: fire_changed.emit(true))
 	_fire_button.button_up.connect(func() -> void: fire_changed.emit(false))
-	_cam_button = _btn("CAMERA: CHASE  [C]", Vector2(190, 50), Vector2(1920.0 - 14.0 - 190.0, 1080.0 - 14.0 - 120.0 - 58.0), C_NAV)
+	_cam_button = _btn("CAMERA: CHASE  [C]", Vector2(190, 50), Vector2(1920.0 - 14.0 - 190.0, 1080.0 - 14.0 - 50.0 - (128.0 if touch else 0.0)), C_NAV)
 	_cam_button.pressed.connect(func() -> void: camera_pressed.emit())
 
 
@@ -336,6 +357,8 @@ func _status_color(f: float) -> Color:
 
 
 func _put(key: String, text: String, color: Color = C_TEXT) -> void:
+	if not _values.has(key):
+		return
 	var l: Label = _values[key]
 	l.text = text
 	l.add_theme_color_override("font_color", color)
@@ -384,7 +407,6 @@ func _water_below_keel() -> float:
 
 
 func _update_nav() -> void:
-	_put("name", "%s  [%s]\n%s" % [ship.display_name, ship.nation, ground_name], C_TEXT)
 	var kts := absf(ship.speed_ms) / 0.5144
 	var astern := ship.speed_ms < -0.2
 	_put("speed", "%.1f kts%s" % [kts, "  ASTERN" if astern else ""], C_NAV if not astern else C_WARN)
@@ -401,61 +423,15 @@ func _update_nav() -> void:
 
 
 func _update_eng() -> void:
-	_put("order", controls.engine_label(), C_ENG)
-	var answered := controls.engine_answered == controls.engine_ordered
-	_put("answer", "ANSWERED" if answered else "answering...", C_GOOD if answered else C_WARN)
 	var pf := ship.propulsion_fraction()
 	var sf := ship.steering_fraction()
 	_put("prop", "%d%%" % int(pf * 100.0), _status_color(pf))
 	_put("steer", "%d%%" % int(sf * 100.0), _status_color(sf))
 
 
-func _update_weapons(aim_point: Vector3, enemies: int, nearest: Ship) -> void:
-	var turrets := ship.gun_turrets()
-	var ok := 0
-	for t in turrets:
-		if t.is_functional():
-			ok += 1
-	var frac := float(ok) / maxf(1.0, float(turrets.size()))
-	_put("battery", "%d / %d turrets" % [ok, turrets.size()], _status_color(frac))
-	while _turret_bars.size() < turrets.size():
-		var bar := ProgressBar.new()
-		bar.custom_minimum_size = Vector2(300, 12)
-		bar.show_percentage = false
-		bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		_turret_box.add_child(bar)
-		_turret_bars.append(bar)
-	for i in _turret_bars.size():
-		var bar2 := _turret_bars[i]
-		if i >= turrets.size():
-			bar2.visible = false
-			continue
-		var t2: Compartment = turrets[i]
-		var left: float = float(gunnery.reload_left.get(t2, 0.0))
-		var full := gunnery.reload_seconds()
-		bar2.max_value = 1.0
-		var fill := 1.0 - clampf(left / maxf(full, 0.1), 0.0, 1.0)
-		bar2.value = fill
-		var col := C_BAD if not t2.is_functional() else (C_GOOD if left <= 0.0 else C_WARN)
-		var sb := StyleBoxFlat.new()
-		sb.bg_color = col
-		sb.set_corner_radius_all(2)
-		bar2.add_theme_stylebox_override("fill", sb)
-		var bg := StyleBoxFlat.new()
-		bg.bg_color = Color(0.1, 0.12, 0.15, 0.9)
-		bg.set_corner_radius_all(2)
-		bar2.add_theme_stylebox_override("background", bg)
-	_put("hostiles", "%d contact%s" % [enemies, "" if enemies == 1 else "s"], C_WEP if enemies > 0 else C_DIM)
-	if nearest != null:
-		var d := ship.global_position.distance_to(nearest.global_position)
-		var rel := nearest.global_position - ship.global_position
-		var brg := bearing_deg(atan2(rel.x, rel.z))
-		_put("nearest", "%s  %d yd  brg %03d" % [nearest.display_name.get_slice(" ", 0), int(d * 1.0936), int(brg)], C_TEXT)
-	else:
-		_put("nearest", "none", C_DIM)
+func _update_weapons(aim_point: Vector3, _enemies: int, _nearest: Ship) -> void:
 	var aim_d := ship.global_position.distance_to(aim_point)
 	var max_r := gunnery.max_range()
-	_put("aim", "%d yd%s" % [int(aim_d * 1.0936), "  OUT OF RANGE" if aim_d > max_r else ""], C_BAD if aim_d > max_r else C_GOOD)
 	var bs := gunnery.battery_status(aim_point)
 	var btxt := ""
 	var bcol := C_GOOD
@@ -762,7 +738,7 @@ func _draw_plates() -> void:
 		if p.x < -60 or p.y < -40 or p.x > vp.x + 60 or p.y > vp.y + 40:
 			continue
 		var covered := false
-		for r in [Rect2(0, 0, 360, 430), Rect2(1510, 0, 410, 760), Rect2(780, 860, 380, 220), Rect2(0, 760, 320, 320), Rect2(1700, 880, 220, 200)]:
+		for r in [Rect2(700, 0, 520, 120), Rect2(1510, 320, 410, 440), Rect2(780, 820, 380, 260), Rect2(0, 760, 320, 320), Rect2(1700, 880, 220, 200)]:
 			if (r as Rect2).has_point(p):
 				covered = true
 		if covered or (_big != null and _big.visible):
