@@ -26,8 +26,21 @@ const INTERNAL := [Compartment.Kind.ENGINE_ROOM, Compartment.Kind.BOILER_ROOM, C
 	Compartment.Kind.FUEL_TANK, Compartment.Kind.STEERING_GEAR, Compartment.Kind.SCREW, Compartment.Kind.RUDDER]
 
 
+const STRUCT := [Compartment.Kind.HULL_SECTION, Compartment.Kind.BOW, Compartment.Kind.STERN]
+
+
 func setup(p_ship: Ship) -> void:
 	ship = p_ship
+	# One smooth lofted hull from the standard frame (red below the waterline, grey above).
+	var frame := ShipFrame.for_entry(Roster.get_entry(ship.class_id))
+	var hull := MeshInstance3D.new()
+	hull.mesh = frame.hull_mesh()
+	var hm := StandardMaterial3D.new()
+	hm.vertex_color_use_as_albedo = true
+	hm.roughness = 0.75
+	hm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	hull.material_override = hm
+	add_child(hull)
 	for c in ship.compartments:
 		if c.kind in INTERNAL:
 			continue                     # hidden inside the hull; still simulated
@@ -36,6 +49,9 @@ func setup(p_ship: Ship) -> void:
 		box.size = c.half_extents * 2.0
 		mi.mesh = box
 		mi.position = c.center
+		if c.kind in STRUCT:
+			mi.scale = Vector3(0.9, 1.0, 0.97)
+			mi.visible = false           # hull sections only show as dark wounds once damaged
 		var mat := StandardMaterial3D.new()
 		mat.albedo_color = COLORS.get(c.kind, Color(0.4, 0.4, 0.4))
 		mat.roughness = 0.8
@@ -64,6 +80,10 @@ func _process(delta: float) -> void:
 		var mi: MeshInstance3D = parts[c]
 		var mat: StandardMaterial3D = _mats[c]
 		_plume(c, mi, (c.on_fire or (c.destroyed and c.kind != Compartment.Kind.HULL_SECTION)) and not ship.sunk)
+		if c.kind in STRUCT:
+			mi.visible = c.destroyed or c.health_fraction() < 0.55
+			mat.albedo_color = Color(0.06, 0.05, 0.05)
+			continue
 		if c.destroyed:
 			mat.albedo_color = Color(0.06, 0.05, 0.05)
 			if c.kind in [Compartment.Kind.MAST, Compartment.Kind.FUNNEL, Compartment.Kind.TURRET]:

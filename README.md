@@ -58,3 +58,15 @@ Captain types (later) will scale these through `AICaptain.captain_mods`, e.g. `{
 - Ammunition spaces can cook off: burning ammo heats up (armour slows it), flooding puts fires out, and heavy hits or
   nearby blasts can trigger sympathetic detonations. Explosions damage other ships in range (blast radius ~25-60 m).
 - Captains steer clear of ships that look ready to blow, with the same error rate.
+
+## Ship construction standard (ShipFrame)
+Every ship is built in one coordinate frame (`scripts/ship/ship_frame.gd`):
+- **Origin:** midships (station 10 of 20), on the centerline, at the design waterline.
+- **+Z** bow, **+X** port (looking toward +Z, +X is on your left), **+Y** up. `y = -draft` is the keel, `y = +freeboard` the main deck. Metres.
+- **Longitudinal:** a station (0 = stern .. 20 = bow), a fraction of length from midships (what the rosters' `turret_z` / `bridge_z` use), or metres.
+- **Vertical:** named decks - `keel, inner_bottom, platform, waterline, main, d01 .. d06` - derived from each ship's draft, length and type, so a destroyer and a battleship use the same description at different scale.
+- **Spaces:** a compartment is a box between two decks, at a station, with a width: `frame.space_at(z, length, "inner_bottom", "platform", x, width)`.
+- **Hull form:** `half_breadth(z)` (parallel mid-body, fine bow, fuller stern) and `deck_y(z)` (sheer) drive both the layout limits and the lofted hull mesh.
+- **Build order** (`ShipBuilder`): hull sections, turrets and magazines (slots reserved), machinery in the largest clear stretch of keel, bridge/mast/funnels, hangar, then fittings (tubes, secondaries, AA). Anything that collides is nudged along the keel.
+- **Audit:** `godot --headless --path . res://tests/test_layout.tscn` checks all classes for spaces outside the hull, overlaps, mirrored hull sections and bridge height. Craft under 40 m only warn (too narrow to avoid every overlap).
+- **Real models (later):** a downloaded mesh keeps the compartment boxes as its damage model; each compartment id can be matched to a named marker in the model.
