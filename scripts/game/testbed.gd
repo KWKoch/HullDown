@@ -44,39 +44,22 @@ func _build_world() -> void:
 	add_child(terrain)
 	terrain.build(ground)
 
-	sun = DirectionalLight3D.new()
 	var tod: float = ground["time_of_day"]
-	var day := clampf(sin((tod - 6.0) / 12.0 * PI), 0.0, 1.0)
-	sun.light_energy = lerpf(0.25, 1.2, day)
-	sun.light_color = Color(0.55, 0.65, 0.95).lerp(Color(1.0, 0.96, 0.88), day)   # moonlight at night
-	sun.light_specular = lerpf(0.05, 0.6, day)   # no blown-out glare on the water at night
-	sun.rotation_degrees = Vector3(-20.0 - 50.0 * day, 135.0, 0)
-	sun.shadow_enabled = true
-	add_child(sun)
-
-	var e := Environment.new()
-	e.background_mode = Environment.BG_COLOR
-	e.background_color = Color(0.02, 0.03, 0.06).lerp(Color(0.55, 0.68, 0.82), day)
-	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	e.ambient_light_color = Color(0.16, 0.2, 0.3).lerp(Color(0.5, 0.58, 0.68), day)
-	e.fog_enabled = true
-	e.fog_light_color = e.background_color
-	e.fog_density = 2.2 / maxf(float(ground["visibility_m"]), 500.0)
-	env = WorldEnvironment.new()
-	env.environment = e
-	add_child(env)
-
-	water = MeshInstance3D.new()
-	var pm := PlaneMesh.new()
-	pm.size = (ground["size_m"] as Vector2) * 1.2
-	water.mesh = pm
-	var wm := StandardMaterial3D.new()
-	wm.albedo_color = Color(0.05, 0.18, 0.28, 0.82)
-	wm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	wm.roughness = 0.4
-	wm.metallic = 0.15
-	water.material_override = wm
-	add_child(water)
+	var weather: String = ground.get("weather", "clear")
+	# Test overrides: --time 14  --weather overcast
+	var cl := OS.get_cmdline_user_args()
+	var ti := cl.find("--time")
+	if ti >= 0 and ti + 1 < cl.size():
+		tod = float(cl[ti + 1])
+	var wi := cl.find("--weather")
+	if wi >= 0 and wi + 1 < cl.size():
+		weather = cl[wi + 1]
+	var preset := SkySea.preset_for(tod, weather, float(ground["visibility_m"]))
+	var built := SkySea.build(self, preset, Vector2(240000, 240000))
+	sun = built["sun"]
+	env = WorldEnvironment.new()   # (the environment node lives inside SkySea's build; kept for API compatibility)
+	water = built["sea"]
+	print("Sky preset: %s (time %.1f, weather %s)" % [preset, tod, weather])
 
 	cam = Camera3D.new()
 	cam.far = 30000.0

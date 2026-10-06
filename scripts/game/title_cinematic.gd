@@ -73,34 +73,9 @@ func _ready() -> void:
 # --- Scene ------------------------------------------------------------------
 
 func _build_sea_and_sky() -> void:
-	var e := Environment.new()
-	e.background_mode = Environment.BG_COLOR
-	e.background_color = Color(0.72, 0.62, 0.52)
-	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	e.ambient_light_color = Color(0.55, 0.5, 0.48)
-	e.fog_enabled = true
-	e.fog_light_color = Color(0.74, 0.65, 0.56)
-	e.fog_density = 0.00003
-	var we := WorldEnvironment.new()
-	we.environment = e
-	add_child(we)
-
-	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-8, 100, 0)
-	sun.light_color = Color(1.0, 0.78, 0.55)
-	sun.light_energy = 1.1
-	add_child(sun)
-
-	var sea := MeshInstance3D.new()
-	var pm := PlaneMesh.new()
-	pm.size = Vector2(80000, 80000)
-	sea.mesh = pm
-	var m := StandardMaterial3D.new()
-	m.albedo_color = Color(0.10, 0.17, 0.24)
-	m.roughness = 0.2
-	m.metallic = 0.4
-	sea.material_override = m
-	add_child(sea)
+	# Grey, hazy North Atlantic dawn: reads as a real horizon and keeps the contact a dark silhouette.
+	var built := SkySea.build(self, "dawn_overcast", Vector2(160000, 160000), false)
+	(built["env"] as Environment).fog_density = 0.00005
 
 	cam = Camera3D.new()
 	cam.far = 90000.0
