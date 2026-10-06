@@ -21,6 +21,12 @@ const SHOW_DAMAGE_PANEL := true      ## damage-control panel + ship schematic
 const C_PANEL := Color(0.04, 0.06, 0.09, 0.72)
 
 var camera: Camera3D
+var sensors: SensorNet
+var _plates: Control
+var _mini: MapView
+var _big: MapView
+var _span_idx := 1
+const MINI_SPANS := [3000.0, 6000.0, 10000.0, 14000.0]
 var _reticle: Control
 var _aim_text := ""
 var _aim_color := Color.WHITE
@@ -129,6 +135,11 @@ func _row(box: VBoxContainer, key: String, caption: String, accent: Color) -> vo
 
 
 func _build() -> void:
+	_plates = Control.new()
+	_plates.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_plates.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_plates.draw.connect(_draw_plates)
+	add_child(_plates)
 	_reticle = Control.new()
 	_reticle.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_reticle.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -158,7 +169,7 @@ func _build() -> void:
 	_turret_box.add_theme_constant_override("separation", 3)
 	_turret_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	wep.add_child(_turret_box)
-	_row(wep, "hostiles", "HOSTILES", C_WEP)
+	_row(wep, "hostiles", "CONTACTS", C_WEP)
 	_row(wep, "nearest", "NEAREST", C_WEP)
 	_row(wep, "aim", "AIM RANGE", C_WEP)
 	_row(wep, "bearing", "BATTERY", C_WEP)
@@ -192,12 +203,57 @@ func _build() -> void:
 
 	# Event log (bottom centre)
 	_log_box = VBoxContainer.new()
-	_log_box.position = Vector2(16.0, 1080.0 - 170.0)
-	_log_box.custom_minimum_size = Vector2(520, 0)
+	_log_box.position = Vector2(320.0, 1080.0 - 170.0)
+	_log_box.custom_minimum_size = Vector2(440, 0)
 	_log_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_log_box)
 
 	_build_controls()
+	_build_maps()
+
+
+func _build_maps() -> void:
+	var t := terrain as BattleTerrain
+	_mini = MapView.new()
+	_mini.size = Vector2(290, 290)
+	_mini.position = Vector2(14, 1080.0 - 14.0 - 290.0)
+	add_child(_mini)
+	_mini.setup(t, sensors, ship, false)
+	_mini.title = "TACTICAL   [M] expand"
+	_mini.span_m = MINI_SPANS[_span_idx]
+	_mini.clicked.connect(toggle_map)
+	_mini.wheel.connect(func(d: int) -> void: _zoom_mini(-d))
+	_ui_controls.append(_mini)
+	var zin := _btn("+", Vector2(30, 30), Vector2(14 + 290 - 34, 1080.0 - 14.0 - 290.0 + 4), C_NAV)
+	zin.pressed.connect(func() -> void: _zoom_mini(-1))
+	var zout := _btn("-", Vector2(30, 30), Vector2(14 + 290 - 68, 1080.0 - 14.0 - 290.0 + 4), C_NAV)
+	zout.pressed.connect(func() -> void: _zoom_mini(1))
+	_big = MapView.new()
+	_big.size = Vector2(830, 830)
+	_big.position = Vector2(960.0 - 415.0, 36)
+	add_child(_big)
+	_big.setup(t, sensors, ship, true)
+	_big.title = "TACTICAL MAP   [M] close"
+	_big.visible = false
+	_big.clicked.connect(toggle_map)
+	_ui_controls.append(_big)
+
+
+func _zoom_mini(step: int) -> void:
+	_span_idx = clampi(_span_idx + step, 0, MINI_SPANS.size() - 1)
+	_mini.span_m = MINI_SPANS[_span_idx]
+
+
+func toggle_map() -> void:
+	_big.visible = not _big.visible
+	if _big.visible:
+		MapView.ensure_texture(terrain as BattleTerrain, true)     # terrain may have been cratered since
+
+
+## Compass bearing (0-359, clockwise from north) for a game heading. Game headings grow toward
+## +X (to port), so a compass bearing is the negative.
+static func bearing_deg(heading_rad: float) -> float:
+	return fposmod(-rad_to_deg(heading_rad), 360.0)
 
 
 func _btn(text: String, size: Vector2, pos: Vector2, color: Color) -> Button:
@@ -268,7 +324,7 @@ func _build_controls() -> void:
 ## True when a screen position (in canvas coordinates) is over an on-screen control.
 func is_over_ui(canvas_pos: Vector2) -> bool:
 	for c in _ui_controls:
-		if c.get_global_rect().has_point(canvas_pos):
+		if c.is_visible_in_tree() and c.get_global_rect().has_point(canvas_pos):
 			return true
 	return false
 
@@ -312,6 +368,7 @@ func update_hud(aim_point: Vector3, mode_name: String, enemies: int, nearest: Sh
 	_compass.queue_redraw()
 	_schematic.queue_redraw()
 	_reticle.queue_redraw()
+	_plates.queue_redraw()
 	_last_aim = aim_point
 
 
@@ -331,7 +388,7 @@ func _update_nav() -> void:
 	var kts := absf(ship.speed_ms) / 0.5144
 	var astern := ship.speed_ms < -0.2
 	_put("speed", "%.1f kts%s" % [kts, "  ASTERN" if astern else ""], C_NAV if not astern else C_WARN)
-	_put("heading", "%03d°" % int(fposmod(rad_to_deg(ship.heading), 360.0)), C_NAV)
+	_put("heading", "%03d°" % int(bearing_deg(ship.heading)), C_NAV)
 	var rd := controls.rudder_degrees()
 	_put("rudder", "%s %d°" % ["PORT" if rd > 0.5 else ("STBD" if rd < -0.5 else "MIDSHIPS"), int(roundf(absf(rd)))] if absf(rd) > 0.5 else "MIDSHIPS", C_NAV)
 	var wb := _water_below_keel()
@@ -388,11 +445,11 @@ func _update_weapons(aim_point: Vector3, enemies: int, nearest: Ship) -> void:
 		bg.bg_color = Color(0.1, 0.12, 0.15, 0.9)
 		bg.set_corner_radius_all(2)
 		bar2.add_theme_stylebox_override("background", bg)
-	_put("hostiles", "%d / %d afloat" % [enemies, opponents_total], C_WEP)
+	_put("hostiles", "%d contact%s" % [enemies, "" if enemies == 1 else "s"], C_WEP if enemies > 0 else C_DIM)
 	if nearest != null:
 		var d := ship.global_position.distance_to(nearest.global_position)
 		var rel := nearest.global_position - ship.global_position
-		var brg := fposmod(rad_to_deg(atan2(rel.x, rel.z)), 360.0)
+		var brg := bearing_deg(atan2(rel.x, rel.z))
 		_put("nearest", "%s  %d yd  brg %03d" % [nearest.display_name.get_slice(" ", 0), int(d * 1.0936), int(brg)], C_TEXT)
 	else:
 		_put("nearest", "none", C_DIM)
@@ -525,7 +582,7 @@ func _update_log() -> void:
 func _draw_compass() -> void:
 	var w := 520.0
 	var h := 44.0
-	var hdg := fposmod(rad_to_deg(ship.heading), 360.0)
+	var hdg := bearing_deg(ship.heading)
 	_compass.draw_rect(Rect2(0, 0, w, h), C_PANEL)
 	_compass.draw_rect(Rect2(0, 0, w, 3), C_NAV)
 	var font := ThemeDB.fallback_font
@@ -635,3 +692,48 @@ func _draw_reticle() -> void:
 	var tp := p + Vector2(-ts.x * 0.5, r + 28.0)
 	_reticle.draw_string(font, tp + Vector2(1, 1), _aim_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0, 0, 0, 0.9))
 	_reticle.draw_string(font, tp, _aim_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, c)
+
+
+## Floating nameplates over every ship we can see: class icon, name and a health bar.
+func _draw_plates() -> void:
+	if camera == null or sensors == null or ship == null:
+		return
+	var font := ThemeDB.fallback_font
+	var vp := _plates.get_viewport_rect().size
+	for k in sensors.picture:
+		var s := k as Ship
+		if s == null or not is_instance_valid(s) or s.sunk or not bool(sensors.picture[k]["live"]):
+			continue
+		var friend := s.team == ship.team
+		var wp := s.global_position + Vector3(0, clampf(s.length_m * 0.1, 12.0, 35.0), 0)
+		if camera.is_position_behind(wp):
+			continue
+		var p := camera.unproject_position(wp)
+		if p.x < -60 or p.y < -40 or p.x > vp.x + 60 or p.y > vp.y + 40:
+			continue
+		var covered := false
+		for r in [Rect2(0, 0, 360, 430), Rect2(1510, 0, 410, 760), Rect2(780, 860, 380, 220), Rect2(0, 760, 320, 320), Rect2(1700, 880, 220, 200)]:
+			if (r as Rect2).has_point(p):
+				covered = true
+		if covered or (_big != null and _big.visible):
+			continue
+		var col := C_GOOD if friend else C_BAD
+		if s == ship:
+			col = C_NAV
+		var nm := s.display_name.get_slice(" (", 0)
+		var dist_txt := "" if s == ship else "  %d yd" % int(s.global_position.distance_to(ship.global_position) * 1.0936)
+		var label := nm + dist_txt
+		var ts := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12)
+		var w := maxf(ts.x + 26.0, 92.0)
+		var top := p + Vector2(-w * 0.5, -30.0)
+		var bg := Rect2(top, Vector2(w, 26.0))
+		_plates.draw_rect(bg, Color(0.03, 0.05, 0.08, 0.7))
+		_plates.draw_rect(Rect2(top, Vector2(3, 26)), col)
+		ShipIcon.draw(_plates, top + Vector2(15, 12), Vector2(0, -1), s.ship_type, 18.0, col)
+		_plates.draw_string(font, top + Vector2(26, 11), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, C_TEXT)
+		var integ := s.integrity()
+		var bar := Rect2(top + Vector2(26, 16), Vector2(w - 32.0, 5.0))
+		_plates.draw_rect(bar, Color(0.1, 0.12, 0.15, 0.95))
+		_plates.draw_rect(Rect2(bar.position, Vector2(bar.size.x * integ, bar.size.y)), _status_color(integ))
+		_plates.draw_rect(bar, Color(0, 0, 0, 0.8), false, 1.0)
+		_plates.draw_line(p + Vector2(0, -4), p, Color(col.r, col.g, col.b, 0.7), 1.0)

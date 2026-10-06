@@ -29,6 +29,8 @@ var look_up := 0.0           ## test option: raise the look-at point to inspect 
 var hud: Hud
 var controls: PlayerControls
 var track: TrackProjection
+var sensors: SensorNet
+var tod_final := 12.0
 var peace := true           ## UI-testing mode: AI ships neither move nor fire. Use --hot for a live battle.
 var fire_held := false
 var touch_aim_world := Vector3.ZERO
@@ -86,6 +88,7 @@ func _build_world() -> void:
 				"--pitch": cam_pitch = deg_to_rad(float(cl[ki + 1]))
 				"--dist": cam_dist = float(cl[ki + 1]); _dist_forced = true
 				"--lookup": look_up = float(cl[ki + 1])
+	tod_final = tod
 	var preset := SkySea.preset_for(tod, weather, float(ground["visibility_m"]))
 	var built := SkySea.build(self, preset, Vector2(240000, 240000))
 	sun = built["sun"]
@@ -132,6 +135,18 @@ func _spawn_fleet() -> void:
 		cam_dist = maxf(70.0, player.length_m * 1.15)
 	track = TrackProjection.new()
 	add_child(track)
+	sensors = SensorNet.new()
+	add_child(sensors)
+	sensors.setup(terrain, player.team, float(ground["visibility_m"]), tod_final < 5.5 or tod_final > 19.5)
+	if peace:
+		# Two friendly ships steaming slowly on station, spread out so their radar coverage adds up.
+		for k in 2:
+			var cls_f: String = pool_a[(k + 1) % pool_a.size()]
+			var fside := 1.0 if k == 0 else -1.0
+			var fpos := _find_water(player.global_position + Vector3(fside * 3200.0, 0, 1200.0 - k * 1800.0), 300.0)
+			var fs := _spawn(cls_f, 0, fpos, false)
+			fs.heading = 0.0
+			fs.throttle = 0.3
 	controls = PlayerControls.new()
 	add_child(controls)
 	controls.setup(player)
@@ -329,6 +344,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			controls.center_helm()
 		elif k == KEY_C:
 			_cycle_camera()
+		elif k == KEY_M:
+			hud.toggle_map()
 		elif k >= KEY_F1 and k <= KEY_F7:
 			ground_id = Battlegrounds.all_grounds()[k - KEY_F1]["id"]
 			get_tree().reload_current_scene()
@@ -484,28 +501,29 @@ func _designate_aim(screen_pos: Vector2) -> void:
 # --- HUD ----------------------------------------------------------------------
 
 func _build_hud() -> void:
+	sensors.scan_now()
 	hud = Hud.new()
 	add_child(hud)
 	hud.camera = cam
+	hud.sensors = sensors
 	var foes := 0
 	for n in get_tree().get_nodes_in_group("ships"):
 		if (n as Ship).team != player.team:
 			foes += 1
 	hud.setup(player, gunnery[player], controls, terrain, String(Battlegrounds.get_ground(ground_id)["name"]), foes)
+	if OS.get_cmdline_user_args().has("--openmap"):
+		hud.toggle_map()
 	hud.camera_pressed.connect(_cycle_camera)
 	hud.fire_changed.connect(func(held: bool) -> void: fire_held = held)
 
 
 func _update_hud() -> void:
-	var enemies := 0
+	var live := sensors.contacts_live(true)
 	var nearest: Ship = null
 	var best := INF
-	for n in get_tree().get_nodes_in_group("ships"):
-		var s := n as Ship
-		if s != null and not s.sunk and s.team != player.team:
-			enemies += 1
-			var d := s.global_position.distance_to(player.global_position)
-			if d < best:
-				best = d
-				nearest = s
-	hud.update_hud(aim_point, CAM_NAMES[cam_mode], enemies, nearest, not touch_aiming)
+	for e in live:
+		var d := e.global_position.distance_to(player.global_position)
+		if d < best:
+			best = d
+			nearest = e
+	hud.update_hud(aim_point, CAM_NAMES[cam_mode], live.size(), nearest, not touch_aiming)
