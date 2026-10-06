@@ -17,6 +17,7 @@ const C_WARN := Color(1.00, 0.78, 0.25)
 const C_BAD := Color(1.00, 0.30, 0.28)
 const C_DIM := Color(0.62, 0.68, 0.72)
 const C_TEXT := Color(0.94, 0.96, 0.97)
+const SHOW_DAMAGE_PANEL := false     ## damage-control panel + ship schematic; hidden while the UI is being reworked
 const C_PANEL := Color(0.04, 0.06, 0.09, 0.72)
 
 var ship: Ship
@@ -161,6 +162,7 @@ func _build() -> void:
 	_schematic.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_schematic.draw.connect(_draw_schematic)
 	dmg.add_child(_schematic)
+	dmg.get_parent().visible = SHOW_DAMAGE_PANEL
 
 	# Compass strip and alerts (top centre)
 	_compass = Control.new()
