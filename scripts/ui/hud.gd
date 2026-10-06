@@ -30,8 +30,8 @@ var camera_mode_name := "CHASE"
 
 var _values: Dictionary = {}          ## key -> Label
 var _ui_controls: Array[Control] = []
-var _telegraph_buttons: Array[Button] = []
-var _helm_buttons: Array[Button] = []
+var _telegraph: DetentGauge
+var _helm: DetentGauge
 var _fire_button: Button
 var _cam_button: Button
 var _compass: Control
@@ -180,8 +180,8 @@ func _build() -> void:
 
 	# Event log (bottom centre)
 	_log_box = VBoxContainer.new()
-	_log_box.position = Vector2(1920.0 * 0.5 - 300.0, 1080.0 - 190.0)
-	_log_box.custom_minimum_size = Vector2(600, 0)
+	_log_box.position = Vector2(16.0, 1080.0 - 170.0)
+	_log_box.custom_minimum_size = Vector2(520, 0)
 	_log_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_log_box)
 
@@ -219,36 +219,31 @@ func _set_btn_colors(b: Button, color: Color, active: bool) -> void:
 
 
 func _build_controls() -> void:
-	# Engine order telegraph: a vertical column on the lower left (green ahead, grey stop, red astern).
-	var n: int = EngineTelegraph.ENGINE_ORDERS.size()
-	var bh := 50.0
-	var gap := 4.0
-	var top := 1080.0 - 14.0 - n * (bh + gap)
-	var cap := _label("ENGINE ORDERS  [W / S]", 13, C_ENG)
-	cap.position = Vector2(14, top - 22)
-	add_child(cap)
-	for i in n:
-		var order: Array = EngineTelegraph.ENGINE_ORDERS[i]
-		var col := C_GOOD if float(order[1]) > 0.0 else (C_DIM if float(order[1]) == 0.0 else C_BAD)
-		var b := _btn(String(order[0]), Vector2(190, bh), Vector2(14, top + i * (bh + gap)), col)
-		var idx := i
-		b.pressed.connect(func() -> void: controls.ring_engine(idx))
-		_telegraph_buttons.append(b)
-	# Helm: a row along the bottom (port on the left, starboard on the right, like looking forward).
-	var hn: int = EngineTelegraph.HELM_ORDERS.size()
-	var hw := 112.0
-	var hx := 236.0
-	var hy := 1080.0 - 14.0 - 62.0
-	var hcap := _label("HELM  [A / D]  [X centres]", 13, C_NAV)
-	hcap.position = Vector2(hx, hy - 22)
-	add_child(hcap)
-	for i in hn:
-		var h: Array = EngineTelegraph.HELM_ORDERS[i]
-		var col2 := C_WEP if float(h[1]) > 0.0 else (C_DIM if float(h[1]) == 0.0 else C_GOOD)
-		var hb := _btn(String(h[0]), Vector2(hw, 62), Vector2(hx + i * (hw + 4.0), hy), col2)
-		var hidx := i
-		hb.pressed.connect(func() -> void: controls.set_helm(hidx))
-		_helm_buttons.append(hb)
+	# Engine order telegraph and helm: small brass gauges, centred along the bottom edge so they
+	# sit in the periphery. Port is red and starboard green, as on the ship's navigation lights.
+	var el: Array[String] = []
+	var ec: Array[Color] = []
+	for o in EngineTelegraph.ENGINE_ORDERS:
+		el.append(String(o[0]))
+		ec.append(C_GOOD if float(o[1]) > 0.0 else (C_DIM if float(o[1]) == 0.0 else C_BAD))
+	_telegraph = DetentGauge.new()
+	_telegraph.size = Vector2(150, 226)
+	_telegraph.position = Vector2(960.0 - 214.0, 1080.0 - 12.0 - 226.0)
+	add_child(_telegraph)
+	_telegraph.setup("ENGINE ORDER  W/S", true, el, ec, controls.engine_ordered)
+	_telegraph.picked.connect(func(i: int) -> void: controls.ring_engine(i))
+	_ui_controls.append(_telegraph)
+	var hl: Array[String] = ["HARD P", "P 20", "P 10", "MID", "S 10", "S 20", "HARD S"]
+	var hc: Array[Color] = []
+	for o in EngineTelegraph.HELM_ORDERS:
+		hc.append(C_BAD if float(o[1]) > 0.0 else (C_DIM if float(o[1]) == 0.0 else C_GOOD))
+	_helm = DetentGauge.new()
+	_helm.size = Vector2(290, 96)
+	_helm.position = Vector2(960.0 - 214.0 + 150.0 + 12.0, 1080.0 - 12.0 - 96.0)
+	add_child(_helm)
+	_helm.setup("HELM  A/D   X centres", false, hl, hc, controls.helm_ordered)
+	_helm.picked.connect(func(i: int) -> void: controls.set_helm(i))
+	_ui_controls.append(_helm)
 	# Fire and camera on the lower right.
 	_fire_button = _btn("FIRE\nMAIN BATTERY", Vector2(190, 120), Vector2(1920.0 - 14.0 - 190.0, 1080.0 - 14.0 - 120.0), C_WEP)
 	_fire_button.add_theme_font_size_override("font_size", 20)
@@ -416,18 +411,22 @@ func _update_dmg() -> void:
 
 
 func _update_buttons() -> void:
-	for i in _telegraph_buttons.size():
-		var order: Array = EngineTelegraph.ENGINE_ORDERS[i]
-		var col := C_GOOD if float(order[1]) > 0.0 else (C_DIM if float(order[1]) == 0.0 else C_BAD)
-		var b := _telegraph_buttons[i]
-		var active := i == controls.engine_ordered
-		_set_btn_colors(b, col, active)
-		# A small marker shows what the engine room is actually running while it catches up.
-		b.text = ("%s%s" % [String(order[0]), "" if controls.engine_answered == i or not active else "  ..."])
-	for i in _helm_buttons.size():
-		var h: Array = EngineTelegraph.HELM_ORDERS[i]
-		var col2 := C_WEP if float(h[1]) > 0.0 else (C_DIM if float(h[1]) == 0.0 else C_GOOD)
-		_set_btn_colors(_helm_buttons[i], col2, i == controls.helm_ordered)
+	_telegraph.ordered = controls.engine_ordered
+	_telegraph.reply = float(controls.engine_answered)
+	_telegraph.reply_matches = controls.engine_answered == controls.engine_ordered
+	_helm.ordered = controls.helm_ordered
+	# Actual rudder position as a fractional detent index (piecewise between the detent values).
+	var r := ship.rudder
+	var hv: Array = EngineTelegraph.HELM_ORDERS
+	var fi := float(hv.size() - 1)
+	for i in hv.size() - 1:
+		var hi_v: float = hv[i][1]
+		var lo_v: float = hv[i + 1][1]
+		if r <= hi_v and r >= lo_v:
+			fi = float(i) + (hi_v - r) / maxf(hi_v - lo_v, 0.0001)
+			break
+	_helm.reply = fi
+	_helm.reply_matches = absf(r - float(hv[controls.helm_ordered][1])) < 0.02
 
 
 func _update_alerts() -> void:

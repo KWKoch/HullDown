@@ -47,6 +47,7 @@ func _ready() -> void:
 		ground_id = args[0]
 	_report_on = args.has("--report")
 	peace = not (args.has("--hot") or args.has("--report") or args.has("--auto"))
+	Gunnery.ceasefire = peace
 	_build_world()
 	_spawn_fleet()
 	_build_hud()
@@ -68,6 +69,8 @@ func _build_world() -> void:
 	var weather: String = ground.get("weather", "clear")
 	# Test overrides: --time 14  --weather overcast
 	var cl := OS.get_cmdline_user_args()
+	if peace:
+		tod = 12.0           # UI testing is done in daylight; --time overrides
 	var ti := cl.find("--time")
 	if ti >= 0 and ti + 1 < cl.size():
 		tod = float(cl[ti + 1])
@@ -400,6 +403,10 @@ func _physics_process(delta: float) -> void:
 		return
 	if _report_on:
 		_report(delta)
+	if OS.get_cmdline_user_args().has("--stat"):
+		_sim_t += delta
+		if fmod(_sim_t, 10.0) < delta:
+			print("[stat %ds] shells %d  hits on anyone %d  player damaged parts %d" % [int(_sim_t), get_tree().get_nodes_in_group("shells").size(), Shell.total_hits, _count_dead(player)])
 	if not player.sunk:
 		if touch_aiming:
 			aim_point = touch_aim_world

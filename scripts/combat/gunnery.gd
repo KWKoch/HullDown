@@ -4,6 +4,7 @@ extends Node
 ## destroyed turret stops firing and a damaged one reloads slower. Solutions are found by
 ## integrating the same ballistics Shell uses, so aiming accounts for drag and gravity.
 
+static var ceasefire := false     ## when true, only the player's ship may fire (UI testing)
 var ship: Ship
 var gun: Dictionary
 var reload_left := {}        ## Compartment -> seconds until ready
@@ -29,7 +30,7 @@ func _physics_process(delta: float) -> void:
 
 ## Fires every ready turret at `target_pos` (world). `target_vel` leads a moving target.
 func fire_at(target_pos: Vector3, target_vel: Vector3) -> int:
-	if gun.is_empty() or ship.sunk:
+	if gun.is_empty() or ship.sunk or (ceasefire and not ship.is_player):
 		return 0
 	var fired := 0
 	for t in reload_left:
