@@ -119,26 +119,25 @@ func _build_contact() -> void:
 
 
 func _build_bridge_wing() -> void:
-	## The watchstander, in silhouette, close to camera at the bridge wing, plus railing.
+	## The lookout, close to camera on the bridge wing, plus the wing's deck edge and rail.
 	var dark := StandardMaterial3D.new()
-	dark.albedo_color = Color(0.03, 0.03, 0.035)
+	dark.albedo_color = Color(0.035, 0.035, 0.04)
+	dark.roughness = 0.85
 	var wing := Node3D.new()
 	wing.name = "Watchstander"
 	cam.add_child(wing)
-	wing.position = Vector3(1.1, -1.5, -3.0)
-	_shape(wing, CapsuleMesh.new(), Vector3(0.0, 0.35, 0.0), Vector3(0.62, 1.0, 0.42), dark)      # torso
-	_shape(wing, SphereMesh.new(), Vector3(0.0, 1.05, 0.0), Vector3(0.30, 0.34, 0.30), dark)       # head
-	_shape(wing, SphereMesh.new(), Vector3(0.0, 1.22, 0.0), Vector3(0.40, 0.18, 0.40), dark)       # helmet
-	_shape(wing, CylinderMesh.new(), Vector3(-0.12, 0.93, -0.32), Vector3(0.11, 0.30, 0.11), dark, Vector3(90, 0, 0))   # binoculars
-	_shape(wing, CylinderMesh.new(), Vector3(0.12, 0.93, -0.32), Vector3(0.11, 0.30, 0.11), dark, Vector3(90, 0, 0))
-	_shape(wing, CapsuleMesh.new(), Vector3(-0.30, 0.65, -0.15), Vector3(0.14, 0.55, 0.14), dark, Vector3(60, 0, 15))   # arms raised to the glasses
-	_shape(wing, CapsuleMesh.new(), Vector3(0.30, 0.65, -0.15), Vector3(0.14, 0.55, 0.14), dark, Vector3(60, 0, -15))
+	wing.position = Vector3(1.05, -1.72, -2.6)          # feet on the deck, eye height about level with the camera
+	wing.rotation_degrees = Vector3(0, 180.0 - 28.0, 0)  # back to us, turned toward the contact
+	wing.add_child(Watchstander.new())
 	var rail := Node3D.new()
 	cam.add_child(rail)
-	rail.position = Vector3(0, -1.9, -3.2)
-	_box(rail, Vector3(12, 0.08, 0.08), Vector3(0, 0.0, 0), dark)
-	for k in range(-5, 6):
-		_box(rail, Vector3(0.05, 0.9, 0.05), Vector3(k * 1.1, -0.45, 0), dark)
+	rail.position = Vector3(0, -1.72, -4.6)
+	_box(rail, Vector3(14, 0.06, 0.06), Vector3(0, 1.0, 0), dark)           # top rail
+	_box(rail, Vector3(14, 0.04, 0.04), Vector3(0, 0.55, 0), dark)          # mid rail
+	for k in range(-6, 7):
+		_box(rail, Vector3(0.04, 1.0, 0.04), Vector3(k * 1.1, 0.5, 0), dark)  # stanchions
+	_box(rail, Vector3(14, 0.3, 0.5), Vector3(0, -0.15, 0.3), dark)          # deck edge / coaming
+	_box(cam, Vector3(14, 0.1, 6.0), Vector3(0, -1.77, -2.6), dark)           # bridge wing deck under his feet
 
 
 func _shape(parent: Node3D, mesh: Mesh, pos: Vector3, scale3: Vector3, mat: Material, rot_deg := Vector3.ZERO) -> void:
