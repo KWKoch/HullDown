@@ -377,9 +377,9 @@ func _water_below_keel() -> float:
 		return 999.0
 	var p := ship.global_position
 	var fwd := Vector3(sin(ship.heading), 0.0, cos(ship.heading))
-	var here: float = -float(terrain.height_at(p.x, p.z)) - ship.draft_m
+	var here: float = -float(terrain.height_at(p.x, p.z)) - ship.wdraft()
 	var ahead_p := p + fwd * 250.0
-	var ahead: float = -float(terrain.height_at(ahead_p.x, ahead_p.z)) - ship.draft_m
+	var ahead: float = -float(terrain.height_at(ahead_p.x, ahead_p.z)) - ship.wdraft()
 	return minf(here, ahead)
 
 
@@ -476,7 +476,9 @@ func _update_weapons(aim_point: Vector3, enemies: int, nearest: Ship) -> void:
 		if int(bs["in_arc"]) < int(bs["total"]):
 			btxt += "  (%d in arc)" % bs["in_arc"]
 	_put("bearing", btxt, bcol)
-	_aim_text = "%d yd  %s" % [int(aim_d * 1.0936), btxt]
+	var tof := gunnery.flight_time(aim_point)
+	var tof_txt := "" if tof < 0.0 else "  ToF %.1fs" % tof
+	_aim_text = "%d yd%s  %s" % [int(aim_d * 1.0936), tof_txt, btxt]
 	_aim_color = bcol
 
 
@@ -705,7 +707,7 @@ func _draw_plates() -> void:
 		if s == null or not is_instance_valid(s) or s.sunk or not bool(sensors.picture[k]["live"]):
 			continue
 		var friend := s.team == ship.team
-		var wp := s.global_position + Vector3(0, clampf(s.length_m * 0.1, 12.0, 35.0), 0)
+		var wp := s.global_position + Vector3(0, clampf(s.wlen() * 0.1, 20.0, 60.0), 0)
 		if camera.is_position_behind(wp):
 			continue
 		var p := camera.unproject_position(wp)
@@ -721,7 +723,11 @@ func _draw_plates() -> void:
 		if s == ship:
 			col = C_NAV
 		var nm := s.display_name.get_slice(" (", 0)
-		var dist_txt := "" if s == ship else "  %d yd" % int(s.global_position.distance_to(ship.global_position) * 1.0936)
+		var dist_txt := ""
+		if s != ship:
+			# Range, plus the target's own course and speed so the player can work out a lead.
+			dist_txt = "  %d yd  %03d/%dkt" % [int(s.global_position.distance_to(ship.global_position) * 1.0936),
+				int(bearing_deg(s.heading)), int(absf(s.speed_ms) / 0.5144)]
 		var label := nm + dist_txt
 		var ts := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12)
 		var w := maxf(ts.x + 26.0, 92.0)

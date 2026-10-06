@@ -360,9 +360,9 @@ func _avoid_ships(desired: float, delta: float) -> float:
 				continue
 			var off := Vector2(ship.global_position.x - o.global_position.x, ship.global_position.z - o.global_position.z)
 			var d := off.length()
-			var keep := (ship.length_m + o.length_m) * 0.5 + 40.0
+			var keep := (ship.wlen() + o.wlen()) * 0.5 + 40.0
 			if o.hazard_r > 0.0 and not _hazard_missed.get(o, false):
-				keep = maxf(keep, o.hazard_r + 60.0 + o.length_m * 0.5)
+				keep = maxf(keep, o.hazard_r + 60.0 + o.wlen() * 0.5)
 			if d < keep and d > 0.1:
 				_avoid_push += off / d * (1.0 - d / keep) * 2.5
 	if _avoid_push == Vector2.ZERO:
@@ -375,11 +375,11 @@ func _avoid_ships(desired: float, delta: float) -> float:
 func _avoid_terrain(desired: float) -> float:
 	if ship.terrain == null:
 		return desired
-	var look := maxf(ship.speed_ms * 25.0, ship.length_m * 1.5)
+	var look := maxf(ship.speed_ms * 25.0, ship.wlen() * 1.5)
 	for off in [0.0, 0.35, -0.35]:
 		var a: float = ship.heading + off
 		var p := ship.global_position + Vector3(sin(a), 0, cos(a)) * look
-		if ship.terrain.height_at(p.x, p.z) > -ship.draft_m * 1.6:
+		if ship.terrain.height_at(p.x, p.z) > -ship.wdraft() * 1.6:
 			var left_a := ship.heading + 0.6
 			var right_a := ship.heading - 0.6
 			var lp := ship.global_position + Vector3(sin(left_a), 0, cos(left_a)) * look

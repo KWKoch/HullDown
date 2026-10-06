@@ -44,6 +44,17 @@ var hazard_r: float = 0.0            ## metres: how far this ship's blast could 
 static var explosions := 0
 static var chain_explosions := 0
 
+## Ships are modelled at real size but shown/fought at WORLD_SCALE x so they are big enough to aim at.
+## Local (compartment) coordinates stay in real metres; the node scale does the rest.
+const WORLD_SCALE := 2.0
+## Toughness over the raw compartment hit points, calibrated against history (see tests/test_durability.gd).
+const DURABILITY := {
+	"destroyer": 7.5, "escort": 7.5, "motor_torpedo_boat": 3.0, "light_cruiser": 4.2, "heavy_cruiser": 4.6,
+	"battlecruiser": 5.4, "battleship": 6.0, "carrier": 5.0, "submarine": 3.0,
+}
+static var overpenetrations := 0
+var top_y: float = 20.0              ## local height of the highest compartment (hit ceiling)
+
 const COOKOFF_SECONDS := 14.0       ## fire exposure that sets off an unprotected ammo space
 
 
@@ -61,6 +72,32 @@ func setup_from_class(entry: Dictionary, p_team: int) -> void:
 	turn_rate_rad = entry.get("turn_rate", 0.05)
 	reserve_buoyancy_t = displacement_t * entry.get("reserve_buoyancy", 0.35)
 	compartments = ShipBuilder.build(entry)
+	var tough: float = DURABILITY.get(ship_type, 2.0)
+	top_y = 8.0
+	for c in compartments:
+		c.max_hp *= tough
+		c.hp = c.max_hp
+		top_y = maxf(top_y, c.center.y + c.half_extents.y)
+	top_y += 4.0                      # masts / rigging above the highest compartment
+	scale = Vector3.ONE * WORLD_SCALE
+
+
+## World-space dimensions (what the eye and the sensors see).
+## World-space velocity vector of the ship.
+func velocity_vec() -> Vector3:
+	return Vector3(sin(heading), 0.0, cos(heading)) * speed_ms
+
+
+func wlen() -> float:
+	return length_m * WORLD_SCALE
+
+
+func wbeam() -> float:
+	return beam_m * WORLD_SCALE
+
+
+func wdraft() -> float:
+	return draft_m * WORLD_SCALE
 
 
 # --- Derived performance --------------------------------------------------
@@ -136,9 +173,9 @@ func gun_turrets() -> Array[Compartment]:
 
 ## shell keys: pen_mm, damage, he_kg, fuse_m (travel after impact before it
 ## detonates), dir (world Vector3), radius (blast radius m).
-func take_hit(world_point: Vector3, shell: Dictionary) -> void:
+func take_hit(world_point: Vector3, shell: Dictionary) -> bool:
 	if sunk:
-		return
+		return false
 	var local := to_local(world_point)
 	var dir_local: Vector3 = (global_transform.basis.inverse() * (shell["dir"] as Vector3)).normalized()
 	var pen: float = shell["pen_mm"]
@@ -147,7 +184,8 @@ func take_hit(world_point: Vector3, shell: Dictionary) -> void:
 	var pos := local
 	var detonated_at := local
 	var stopped := false
-	while travelled < 40.0 and pen > 0.0 and not stopped:
+	var exited := false
+	while travelled < 80.0 and pen > 0.0 and not stopped:
 		var hit := _compartment_at(pos)
 		if hit != null and not hit.destroyed:
 			var armor := hit.armor_mm
@@ -167,7 +205,16 @@ func take_hit(world_point: Vector3, shell: Dictionary) -> void:
 		pos += dir_local * 0.5
 		travelled += 0.5
 		detonated_at = pos
+		# Out through the far side (or the deck/bottom) before the fuse ran: an over-penetration.
+		if absf(pos.x) > beam_m * 0.5 + 0.5 or absf(pos.z) > length_m * 0.5 + 0.5 \
+				or pos.y > top_y or pos.y < -draft_m - 0.5:
+			exited = true
+			break
+	if exited:
+		overpenetrations += 1
+		return false
 	_detonate(detonated_at, shell)
+	return true
 
 
 func _compartment_at(local_pt: Vector3) -> Compartment:
@@ -217,7 +264,7 @@ func _magazine_explosion(c: Compartment) -> void:
 	var chain := {"damage": yield_kg * 0.6, "radius": 25.0, "pen_mm": 0, "dir": Vector3.DOWN}
 	_detonate(c.center, chain)
 	# Catastrophic if the magazine is large: break the ship's back.
-	if c.max_hp > 800.0:
+	if c.max_hp > 800.0 * float(DURABILITY.get(ship_type, 2.0)):
 		for other in compartments:
 			if other.kind == Compartment.Kind.HULL_SECTION and other.distance_to(c.center) < 40.0:
 				other.apply_damage(other.max_hp)
@@ -238,7 +285,7 @@ func _blast_neighbors(pos: Vector3, yield_kg: float) -> void:
 		var other := n as Ship
 		if other == null or other == self or other.sunk:
 			continue
-		if other.global_position.distance_to(pos) > radius + other.length_m * 0.5:
+		if other.global_position.distance_to(pos) > radius + other.wlen() * 0.5:
 			continue
 		other.take_blast(pos, yield_kg, radius)
 
@@ -392,9 +439,9 @@ func _check_terrain(delta: float) -> void:
 	# Sample bow, midships and stern keel points for grounding.
 	var fwd := Vector3(sin(heading), 0.0, cos(heading))
 	for f in [0.5, 0.0, -0.5]:
-		var p: Vector3 = global_position + fwd * (length_m * f)
+		var p: Vector3 = global_position + fwd * (wlen() * f)
 		var floor_y: float = terrain.height_at(p.x, p.z)
-		if floor_y > -draft_m:
+		if floor_y > -wdraft():
 			var hardness: float = terrain.hardness_at(p.x, p.z) if terrain.has_method("hardness_at") else 1.0
 			# Damage only on actual contact at speed, with a cooldown; a ship that is
 			# stuck on the bottom just stays stuck (it can reverse off).
@@ -424,5 +471,5 @@ func _check_sinking() -> void:
 func _sink(delta: float) -> void:
 	position.y -= delta * 1.2
 	rotation.z = move_toward(rotation.z, signf(list_rad if list_rad != 0.0 else 1.0) * 1.4, delta * 0.15)
-	if position.y < -draft_m * 4.0 - 40.0:
+	if position.y < -wdraft() * 4.0 - 40.0:
 		queue_free()

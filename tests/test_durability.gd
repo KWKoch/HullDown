@@ -47,7 +47,7 @@ func _trial(e: Dictionary, cal: float, kg: float) -> Array:
 		var dir := Vector3(-side, -0.12, randf_range(-0.35, 0.35)).normalized()
 		var v_frac := 0.8
 		var hit := {
-			"pen_mm": cal * v_frac * 1.05, "damage": kg * 3.0, "fuse_m": 6.0,
+			"pen_mm": cal * v_frac * 1.05, "damage": kg * 3.0, "fuse_m": clampf(cal * 0.035, 3.0, 16.0),
 			"radius": clampf(pow(kg, 0.33) * 1.2, 2.0, 18.0), "dir": dir,
 		}
 		s.take_hit(s.to_global(pt), hit)

@@ -12,6 +12,8 @@ var owner_ship: Ship
 var terrain: BattleTerrain
 var age := 0.0
 var _entered_water := false
+var _passed: Array[Ship] = []     ## ships this shell already went clean through
+var trail: ShellTrail
 
 ## Test counters
 static var total_hits := 0
@@ -22,13 +24,23 @@ signal impact(world_pos: Vector3, ship: Ship, caliber_mm: float)
 signal terrain_hit(world_pos: Vector3, caliber_mm: float)
 
 
-func launch(p_owner: Ship, p_terrain: BattleTerrain, from: Vector3, dir: Vector3, p_spec: Dictionary) -> void:
+func launch(p_owner: Ship, p_terrain: BattleTerrain, from: Vector3, dir: Vector3, p_spec: Dictionary, inherit: Vector3 = Vector3.ZERO) -> void:
 	owner_ship = p_owner
 	terrain = p_terrain
 	spec = p_spec
 	global_position = from
-	velocity = dir.normalized() * float(p_spec["muzzle_ms"])
+	# The shell keeps the firing ship's own motion: a moving ship throws its shells sideways.
+	velocity = dir.normalized() * float(p_spec["muzzle_ms"]) + inherit
 	add_to_group("shells")
+	if p_owner != null and p_owner.is_player:
+		trail = ShellTrail.new()
+		get_tree().current_scene.add_child(trail)
+		trail.add_point(from, true)
+
+
+func _exit_tree() -> void:
+	if trail != null and is_instance_valid(trail):
+		trail.finish(global_position)
 
 
 func _physics_process(delta: float) -> void:
@@ -49,19 +61,21 @@ func _physics_process(delta: float) -> void:
 			queue_free()
 			return
 	global_position = next
+	if trail != null:
+		trail.add_point(next)
 
 
 func _check_hit(p: Vector3) -> bool:
 	# Ships.
 	for node in get_tree().get_nodes_in_group("ships"):
 		var s := node as Ship
-		if s == null or s.sunk or s == owner_ship:
+		if s == null or s.sunk or s == owner_ship or _passed.has(s):
 			continue
-		if s.global_position.distance_to(p) > s.length_m * 0.7:
+		if s.global_position.distance_to(p) > s.wlen() * 0.7:
 			continue
 		var local := s.to_local(p)
 		if absf(local.x) <= s.beam_m * 0.5 and absf(local.z) <= s.length_m * 0.5 \
-				and local.y <= 20.0 and local.y >= -s.draft_m:
+				and local.y <= s.top_y and local.y >= -s.draft_m:
 			var cal: float = spec["caliber_mm"]
 			var v_frac := clampf(velocity.length() / float(spec["muzzle_ms"]), 0.2, 1.0)
 			var kg: float = spec["shell_kg"]
@@ -78,10 +92,16 @@ func _check_hit(p: Vector3) -> bool:
 				if Shell.friendly_hits <= 12 and OS.get_cmdline_user_args().has("--report"):
 					print("FRIENDLY HIT: %s -> %s | shell y=%.0f age=%.1fs dist_from_shooter=%.0f m | shooter-victim sep=%.0f" % [
 						owner_ship.class_id, s.class_id, p.y, age, owner_ship.global_position.distance_to(p), owner_ship.global_position.distance_to(s.global_position)])
-			s.take_hit(p, hit)
-			Fx.impact(self, p, cal)
-			impact.emit(p, s, cal)
-			return true
+			if s.take_hit(p, hit):
+				Fx.impact(self, p, cal)
+				impact.emit(p, s, cal)
+				return true
+			# Over-penetration: the shell went through the thin hull before its fuze ran and
+			# carries on, to burst in the water beyond.
+			_passed.append(s)
+			velocity *= 0.8
+			Fx.impact(self, p, cal * 0.4)
+			continue
 	# Terrain / seabed.
 	if terrain != null:
 		var h := terrain.height_at(p.x, p.z)

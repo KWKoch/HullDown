@@ -16,7 +16,15 @@ var train := {}              ## Compartment -> training angle relative to the tu
 var traverse_rate := 0.12    ## rad/s the turrets can swing
 var _track_pos := Vector3.ZERO
 var _track_t := 0.0
-var dispersion_deg := 0.35   ## 1-sigma angular scatter at full health
+var dispersion_deg := 0.22   ## 1-sigma per-shell angular scatter at full health, steady ship
+var _salvo_yaw := 0.0        ## error shared by every shell of the current salvo (rad)
+var _salvo_pitch := 0.0
+const MV_SIGMA := 0.0025      ## 1-sigma muzzle-velocity variation: the main source of range scatter
+const SALVO_SIGMA_DEG := 0.12
+const TURRET_SIGMA_DEG := 0.10
+## The solver integrates in 0.2 s steps for speed; against Shell's 1/60 s that under-reads the
+## range by a near-constant ~125 m, so it is added back (checked by tests/test_ballistics.gd).
+const STEP_BIAS := 126.0
 
 
 func setup(p_ship: Ship) -> void:
@@ -97,6 +105,9 @@ func fire_at(target_pos: Vector3, target_vel: Vector3) -> int:
 		return 0
 	aim_at(target_pos)
 	var fired := 0
+	# One error common to the whole ship's salvo (layer/trainer, rangefinder, roll).
+	_salvo_yaw = randfn(0.0, deg_to_rad(SALVO_SIGMA_DEG))
+	_salvo_pitch = randfn(0.0, deg_to_rad(SALVO_SIGMA_DEG) * 0.2)
 	for t in reload_left:
 		var turret: Compartment = t
 		if not turret.is_functional() or reload_left[t] > 0.0:
@@ -120,12 +131,17 @@ func fire_at(target_pos: Vector3, target_vel: Vector3) -> int:
 	return fired
 
 
+## Aim solution in the firing ship's own moving frame: the shell inherits our velocity, and the
+## target moves at `tvel`, so the shot has to be placed at where the target will be relative to
+## us when the shell arrives. A caller that passes a zero `tvel` is treating the target as
+## stationary in the world (our own drift is still compensated) -- the player must lead by hand.
 func _lead(muzzle: Vector3, target: Vector3, tvel: Vector3) -> Vector3:
 	var v0: float = gun["muzzle_ms"]
+	var rel := tvel - ship.velocity_vec()
 	var t_guess := muzzle.distance_to(target) / (v0 * 0.8)
 	var aim_pt := target
 	for i in 3:
-		aim_pt = target + tvel * t_guess
+		aim_pt = target + rel * t_guess
 		t_guess = _time_of_flight(muzzle, aim_pt, v0)
 		if t_guess < 0.0:
 			return Vector3.ZERO
@@ -135,6 +151,17 @@ func _lead(muzzle: Vector3, target: Vector3, tvel: Vector3) -> Vector3:
 	var flat := Vector3(aim_pt.x - muzzle.x, 0.0, aim_pt.z - muzzle.z)
 	var bearing := atan2(flat.x, flat.z)
 	return Vector3(sin(bearing) * cos(elev), sin(elev), cos(bearing) * cos(elev))
+
+
+## Seconds a shell takes to reach a world point from this ship's guns (-1 if out of range).
+func flight_time(target: Vector3) -> float:
+	if gun.is_empty():
+		return -1.0
+	var from := ship.to_global(Vector3(0, 2.0, 0))
+	for t in reload_left:
+		from = ship.to_global((t as Compartment).center + Vector3(0, 2.0, 0))
+		break
+	return _time_of_flight(from, target, float(gun["muzzle_ms"]))
 
 
 func _solve_elevation(from: Vector3, to: Vector3, v0: float) -> float:
@@ -177,7 +204,7 @@ func _range_at_height(elev: float, v0: float, dy: float) -> float:
 		var np := pos + vel * dt
 		if vel.y < 0.0 and np.y <= dy:
 			var t := (pos.y - dy) / maxf(pos.y - np.y, 0.0001)
-			return pos.x + (np.x - pos.x) * t
+			return pos.x + (np.x - pos.x) * t + STEP_BIAS
 		pos = np
 	return -1.0
 
@@ -233,11 +260,11 @@ func clear_of_friendlies(target_pos: Vector3, target_vel: Vector3, offsets: Dict
 		if f == null or f == ship or f.sunk or f.team != ship.team:
 			continue
 		var believed := f.global_position + (offsets.get(f, Vector3.ZERO) as Vector3)
-		var half_len := f.length_m * 0.5
+		var half_len := f.wlen() * 0.5
 		for entry in paths:
 			var muzzle: Vector3 = entry[0]
 			for p in (entry[1] as Array):
-				if p.y > 45.0 or p.y < -f.draft_m:
+				if p.y > 45.0 or p.y < -f.wdraft():
 					continue                                    # over the masts / under the water
 				var horiz := Vector2(p.x - believed.x, p.z - believed.z).length()
 				var range_from_gun := Vector2(p.x - muzzle.x, p.z - muzzle.z).length()
@@ -246,15 +273,25 @@ func clear_of_friendlies(target_pos: Vector3, target_vel: Vector3, offsets: Dict
 	return true
 
 
-func _spawn_shell(muzzle: Vector3, dir: Vector3, turret: Compartment) -> void:
-	var spread := deg_to_rad(dispersion_deg) * (1.0 + (1.0 - turret.health_fraction()))
+func _spawn_shell(muzzle: Vector3, dir: Vector3, turret: Compartment, salvo_yaw: float = 0.0, salvo_pitch: float = 0.0) -> void:
+	# Shot-to-shot scatter grows with a damaged mount, a ship at speed and a ship turning hard.
+	var motion := 1.0 + 0.6 * clampf(absf(ship.speed_ms) / maxf(ship.max_speed_ms, 1.0), 0.0, 1.0) \
+			+ 0.8 * absf(ship.rudder) * clampf(absf(ship.speed_ms) / maxf(ship.max_speed_ms, 1.0), 0.0, 1.0)
+	var wear := 1.0 + (1.0 - turret.health_fraction())
+	var spread := deg_to_rad(dispersion_deg) * wear * motion
 	var d := dir
-	d = d.rotated(Vector3.UP, randfn(0.0, spread))
-	d = d.rotated(d.cross(Vector3.UP).normalized(), randfn(0.0, spread * 0.6))
-	var shell := Shell.new()
+	d = d.rotated(Vector3.UP, salvo_yaw * motion + randfn(0.0, spread))
+	var right := d.cross(Vector3.UP).normalized()
+	d = d.rotated(right, salvo_pitch * motion + randfn(0.0, spread * 0.15))
+	var cal := float(gun["caliber_mm"])
 	var spec := {
-		"caliber_mm": gun["caliber_mm"], "shell_kg": gun["shell_kg"], "muzzle_ms": gun["muzzle_ms"],
-		"he_kg": float(gun["shell_kg"]) * 0.06, "fuse_m": 6.0 if float(gun["caliber_mm"]) > 150.0 else 2.0,
+		"caliber_mm": cal, "shell_kg": gun["shell_kg"],
+		# Muzzle velocity varies shell to shell (powder lot, barrel wear): the main source of range scatter.
+		"muzzle_ms": float(gun["muzzle_ms"]) * (1.0 + randfn(0.0, MV_SIGMA * wear)),
+		"he_kg": float(gun["shell_kg"]) * 0.06,
+		# AP fuze delay runs ~0.03 s: roughly 3.5 cm of travel per mm of calibre, in ship-model metres.
+		"fuse_m": clampf(cal * 0.035, 3.0, 16.0),
 	}
+	var shell := Shell.new()
 	ship.get_tree().current_scene.add_child(shell)
-	shell.launch(ship, ship.terrain as BattleTerrain, muzzle, d, spec)
+	shell.launch(ship, ship.terrain as BattleTerrain, muzzle, d, spec, ship.velocity_vec())

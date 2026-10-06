@@ -16,15 +16,15 @@ func setup(p_ship: Ship) -> void:
 	_stern.mesh = _flat_quad()
 	_stern.flatness = 1.0
 	_stern.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
-	_stern.emission_box_extents = Vector3(ship.beam_m * 0.32, 0.0, 2.0)
-	_stern.scale_amount_min = maxf(ship.beam_m * 0.45, 3.0)
-	_stern.scale_amount_max = maxf(ship.beam_m * 0.7, 4.0)
+	_stern.emission_box_extents = Vector3(ship.wbeam() * 0.32, 0.0, 2.0)
+	_stern.scale_amount_min = maxf(ship.wbeam() * 0.45, 3.0)
+	_stern.scale_amount_max = maxf(ship.wbeam() * 0.7, 4.0)
 	_stern.angle_min = -180.0
 	_stern.angle_max = 180.0
 	_stern.emitting = false
 	add_child(_stern)
 
-	_bow = Fx.make(60, 1.1, maxf(ship.beam_m * 0.12, 1.2), Fx._ramp(Color(1, 1, 1, 0.75), Color(0.92, 0.96, 1.0, 0.4), Color(0.9, 0.95, 1.0, 0.0)),
+	_bow = Fx.make(60, 1.1, maxf(ship.wbeam() * 0.12, 1.2), Fx._ramp(Color(1, 1, 1, 0.75), Color(0.92, 0.96, 1.0, 0.4), Color(0.9, 0.95, 1.0, 0.0)),
 		7.0, 38.0, Vector3.UP, 9.0, false, 1.6, false)
 	_bow.emitting = false
 	add_child(_bow)
@@ -54,10 +54,10 @@ func _process(delta: float) -> void:
 	_stern.emitting = near and spd > 1.5
 	if OS.get_cmdline_user_args().has("--wakedebug") and ship.is_player and int(_t * 10.0) % 20 == 0:
 		print("WAKE spd=%.1f emit=%s near=%s pos=%s vis=%s amt=%d" % [spd, _stern.emitting, near, str(_stern.global_position), str(_stern.is_visible_in_tree()), _stern.amount])
-	_stern.global_position = ship.global_position - fwd * ship.length_m * 0.42 + Vector3(0, 0.35, 0)
+	_stern.global_position = ship.global_position - fwd * ship.wlen() * 0.42 + Vector3(0, 0.35, 0)
 	_stern.speed_scale = clampf(spd / 10.0, 0.5, 1.5)
 	_stern.initial_velocity_max = 0.4 + spd * 0.02
 	_bow.emitting = near and spd > 6.0
-	_bow.global_position = ship.global_position + fwd * ship.length_m * 0.46 + Vector3(0, 0.8, 0)
+	_bow.global_position = ship.global_position + fwd * ship.wlen() * 0.46 + Vector3(0, 0.8, 0)
 	_bow.direction = (Vector3.UP + fwd * 0.5).normalized()
 	_bow.initial_velocity_max = 3.0 + spd * 0.35

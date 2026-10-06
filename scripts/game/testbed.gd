@@ -28,7 +28,6 @@ var _yaw_forced := false
 var look_up := 0.0           ## test option: raise the look-at point to inspect the sky
 var hud: Hud
 var controls: PlayerControls
-var track: TrackProjection
 var sensors: SensorNet
 var tod_final := 12.0
 var peace := true           ## UI-testing mode: AI ships neither move nor fire. Use --hot for a live battle.
@@ -132,9 +131,7 @@ func _spawn_fleet() -> void:
 				c.ammo_stored = 0.0
 	cam_heading = 0.0
 	if not _dist_forced:
-		cam_dist = maxf(70.0, player.length_m * 1.15)
-	track = TrackProjection.new()
-	add_child(track)
+		cam_dist = maxf(70.0, player.wlen() * 1.15)
 	sensors = SensorNet.new()
 	add_child(sensors)
 	sensors.setup(terrain, player.team, float(ground["visibility_m"]), tod_final < 5.5 or tod_final > 19.5)
@@ -250,7 +247,7 @@ func _zoom(factor: float) -> void:
 
 func _cycle_camera() -> void:
 	cam_mode = ((cam_mode + 1) % CAM_NAMES.size()) as CamMode
-	var len_m := player.length_m
+	var len_m := player.wlen()
 	match cam_mode:
 		CamMode.CHASE:
 			cam_yaw = PI + 0.55
@@ -437,9 +434,15 @@ func _physics_process(delta: float) -> void:
 	if OS.get_cmdline_user_args().has("--stat"):
 		_sim_t += delta
 		if fmod(_sim_t, 10.0) < delta:
-			print("[stat %ds] shells %d  hits on anyone %d  player damaged parts %d" % [int(_sim_t), get_tree().get_nodes_in_group("shells").size(), Shell.total_hits, _count_dead(player)])
+			print("[stat %ds] shells %d  trails %d  hits on anyone %d  overpens %d  player damaged parts %d" % [int(_sim_t), get_tree().get_nodes_in_group("shells").size(), get_tree().get_nodes_in_group("trails").size(), Shell.total_hits, Ship.overpenetrations, _count_dead(player)])
+	if OS.get_cmdline_user_args().has("--snapcheck") and _sim_t_chk < 3.0:
+		_sim_t_chk += delta
+		if _sim_t_chk >= 3.0:
+			_snapcheck()
 	if not player.sunk:
-		if touch_aiming:
+		if OS.get_cmdline_user_args().has("--autoaim"):
+			_autoaim()
+		elif touch_aiming:
 			aim_point = touch_aim_world
 		else:
 			_update_aim_point(get_viewport().get_mouse_position())
@@ -448,15 +451,62 @@ func _physics_process(delta: float) -> void:
 			(gunnery[player] as Gunnery).fire_at(aim_point, Vector3.ZERO)
 	else:
 		fire_held = false
-	track.update_for(player)
 	_update_camera(delta)
 	_update_hud()
+
+
+## Test aid (--autoaim): fire at the nearest hostile as a stationary world point, i.e. with no lead.
+func _snapcheck() -> void:
+	# Cast the camera ray at each hostile's hull: the aim point must land on the ship, not the water behind it.
+	for n in get_tree().get_nodes_in_group("ships"):
+		var sh := n as Ship
+		if sh == null or sh.team == player.team:
+			continue
+		var from := cam.global_position
+		var dir := (sh.global_position + Vector3(0, sh.top_y * 0.4, 0) - from).normalized()
+		var p := _march(from, dir)
+		var local := sh.to_local(p)
+		print("SNAPCHECK %s dist %.0f m: aim point %.0f m from ship centre, local y %.1f (water behind would be y 0)" % [sh.class_id, from.distance_to(sh.global_position), p.distance_to(sh.global_position), local.y])
+
+
+func _autoaim() -> void:
+	var best: Ship = null
+	for n in get_tree().get_nodes_in_group("ships"):
+		var sh := n as Ship
+		if sh == null or sh.team == player.team or sh.sunk:
+			continue
+		if best == null or sh.global_position.distance_to(player.global_position) < best.global_position.distance_to(player.global_position):
+			best = sh
+	if best != null:
+		aim_point = best.global_position + Vector3(0, 6.0, 0)
+		fire_held = true
+
+
+## Test aid (--shot=path,seconds): save a screenshot after some seconds and quit.
+func _process(delta: float) -> void:
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--shot="):
+			var parts := a.substr(7).split(",")
+			_shot_t += delta
+			var ready := _shot_t > float(parts[1])
+			if ready and OS.get_cmdline_user_args().has("--await-trail"):
+				ready = false
+				for tr in get_tree().get_nodes_in_group("trails"):
+					if (tr as ShellTrail).point_count() >= 12:
+						ready = true
+			if ready:
+				get_viewport().get_texture().get_image().save_png(parts[0])
+				get_tree().quit()
+
+
+var _shot_t := 0.0
+var _sim_t_chk := 0.0
 
 
 func _update_camera(delta: float) -> void:
 	cam_heading = lerp_angle(cam_heading, player.heading, 1.0 - exp(-2.5 * delta))
 	if cam_mode == CamMode.BRIDGE:
-		var bp := player.global_position + Vector3(0, player.length_m * 0.05 + 6.0, 0)
+		var bp := player.global_position + Vector3(0, player.wlen() * 0.05 + 6.0, 0)
 		for c in player.compartments:
 			if c.kind == Compartment.Kind.BRIDGE:
 				bp = player.to_global(c.center + Vector3(0, c.half_extents.y + 1.6, 0))
@@ -468,7 +518,7 @@ func _update_camera(delta: float) -> void:
 		cam.fov = 70.0
 		return
 	cam.fov = 70.0
-	var focus_h := clampf(player.length_m * 0.04, 4.0, 14.0)
+	var focus_h := clampf(player.wlen() * 0.04, 4.0, 28.0)
 	var focus := player.global_position + Vector3(0, focus_h, 0)
 	var yaw := cam_heading + cam_yaw
 	var dir := Vector3(sin(yaw) * cos(cam_pitch), sin(cam_pitch), cos(yaw) * cos(cam_pitch))
@@ -477,13 +527,51 @@ func _update_camera(delta: float) -> void:
 
 
 func _march(from: Vector3, dir: Vector3) -> Vector3:
-	# March the ray until it meets the terrain or the water.
+	# March the ray until it meets the terrain or the water...
 	var p := from
-	for _i in 600:
+	var t_ground := 30000.0
+	for i in 600:
 		p += dir * 50.0
 		if p.y <= maxf(terrain.height_at(p.x, p.z), 0.0):
+			t_ground = (i + 1) * 50.0
 			break
+	# ...unless it meets a ship's hull or superstructure first: then the aim point snaps onto the ship.
+	var t_ship := _ray_ships(from, dir, t_ground)
+	if t_ship > 0.0:
+		return from + dir * t_ship
 	return p
+
+
+## Distance along a ray to the nearest ship (other than the player's) it passes through, or -1.
+func _ray_ships(from: Vector3, dir: Vector3, max_t: float) -> float:
+	var best := -1.0
+	for n in get_tree().get_nodes_in_group("ships"):
+		var sh := n as Ship
+		if sh == null or sh == player or sh.sunk:
+			continue
+		var o := sh.to_local(from)
+		var d := sh.global_transform.basis.inverse() * dir
+		var lo := Vector3(-sh.beam_m * 0.5, -sh.draft_m, -sh.length_m * 0.5)
+		var hi := Vector3(sh.beam_m * 0.5, sh.top_y, sh.length_m * 0.5)
+		var t0 := 0.0
+		var t1 := max_t
+		var ok := true
+		for ax in 3:
+			if absf(d[ax]) < 0.000001:
+				if o[ax] < lo[ax] or o[ax] > hi[ax]:
+					ok = false
+					break
+			else:
+				var ta: float = (lo[ax] - o[ax]) / d[ax]
+				var tb: float = (hi[ax] - o[ax]) / d[ax]
+				t0 = maxf(t0, minf(ta, tb))
+				t1 = minf(t1, maxf(ta, tb))
+				if t0 > t1:
+					ok = false
+					break
+		if ok and t0 > 0.0 and (best < 0.0 or t0 < best):
+			best = t0
+	return best
 
 
 func _update_aim_point(screen_pos: Vector2) -> void:
