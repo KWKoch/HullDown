@@ -1,7 +1,9 @@
 extends Node3D
 ## Surface-ship testbed: the player vs 30 AI opponents on one of the seven battlegrounds.
-## Controls: W/S throttle, A/D rudder, hold RMB + move mouse to orbit, wheel to zoom,
-## LMB fires the main battery at the cursor. [ / ] cycle your ship. F1-F7 pick a battleground.
+## Controls (keyboard and the identical on-screen buttons): W/S ring the engine telegraph,
+## A/D step the helm (X centres), Space / LMB / FIRE button fire at the aim point, C cycles the camera.
+## PC: hold RMB + move to orbit, wheel zooms, the cursor aims.  Touch: one-finger drag orbits,
+## pinch zooms, tap designates the aim point.  [ / ] cycle your ship. F1-F7 pick a battleground.
 
 const OPPONENTS := 30
 
@@ -12,11 +14,26 @@ var terrain: BattleTerrain
 var player: Ship
 var gunnery: Dictionary = {}       ## Ship -> Gunnery
 var cam: Camera3D
-var cam_yaw := PI           ## chase view: camera behind the ship, looking forward
-var cam_pitch := 0.16
-var cam_dist := 170.0
+enum CamMode { CHASE, BROADSIDE, OVERHEAD, BRIDGE }
+const CAM_NAMES := ["CHASE", "BROADSIDE", "OVERHEAD", "BRIDGE"]
+var cam_mode := CamMode.CHASE
+var cam_yaw := PI + 0.55    ## relative to the ship's heading: PI = dead astern; offset gives a 3/4 quarter view
+var cam_pitch := 0.24
+var cam_dist := 170.0       ## set from the player's length at spawn (unless --dist is given)
+var cam_heading := 0.0      ## smoothed heading the camera follows
+var bridge_yaw := 0.0
+var bridge_pitch := 0.0
+var _dist_forced := false
+var _yaw_forced := false
 var look_up := 0.0           ## test option: raise the look-at point to inspect the sky
-var hud: Label
+var hud: Hud
+var controls: PlayerControls
+var fire_held := false
+var touch_aim_world := Vector3.ZERO
+var touch_aiming := false
+var _touches: Dictionary = {}
+var _pinch_last := 0.0
+var _tap_start := {}
 var sun: DirectionalLight3D
 var env: WorldEnvironment
 var water: MeshInstance3D
@@ -59,9 +76,9 @@ func _build_world() -> void:
 		var ki := cl.find(k)
 		if ki >= 0 and ki + 1 < cl.size():
 			match k:
-				"--yaw": cam_yaw = deg_to_rad(float(cl[ki + 1]))
+				"--yaw": cam_yaw = deg_to_rad(float(cl[ki + 1])); _yaw_forced = true
 				"--pitch": cam_pitch = deg_to_rad(float(cl[ki + 1]))
-				"--dist": cam_dist = float(cl[ki + 1])
+				"--dist": cam_dist = float(cl[ki + 1]); _dist_forced = true
 				"--lookup": look_up = float(cl[ki + 1])
 	var preset := SkySea.preset_for(tod, weather, float(ground["visibility_m"]))
 	var built := SkySea.build(self, preset, Vector2(240000, 240000))
@@ -93,6 +110,18 @@ func _spawn_fleet() -> void:
 		var s := _spawn(cls, 1, _find_water(anchor + offset), false)
 		s.heading = PI
 	player.heading = 0.0
+	cam_heading = 0.0
+	if not _dist_forced:
+		cam_dist = maxf(70.0, player.length_m * 1.15)
+	controls = PlayerControls.new()
+	add_child(controls)
+	controls.setup(player)
+	var oi := OS.get_cmdline_user_args().find("--order")      # test: ring an engine order (index into ENGINE_ORDERS)
+	if oi >= 0:
+		controls.ring_engine(int(OS.get_cmdline_user_args()[oi + 1]))
+	var hi := OS.get_cmdline_user_args().find("--helm")
+	if hi >= 0:
+		controls.set_helm(int(OS.get_cmdline_user_args()[hi + 1]))
 	# Test option: --allies N adds N AI-controlled ships on the player's side.
 	var cl := OS.get_cmdline_user_args()
 	var ai_i := cl.find("--allies")
@@ -102,6 +131,7 @@ func _spawn_fleet() -> void:
 			var off_a := Vector3((i % 6 - 2.5) * 650.0, 0, 650.0 + (i / 6) * 650.0)
 			_spawn(cls_a, 0, _find_water((ground["spawn_a"] as Vector3) + off_a), false)
 	if OS.get_cmdline_user_args().has("--auto"):
+		controls.set_physics_process(false)     # the AI captain drives the player ship in tests
 		var ai := AICaptain.new()
 		player.add_child(ai)
 		ai.setup(player, gunnery[player])
@@ -167,18 +197,120 @@ func _find_water(want: Vector3, min_sep: float = 450.0) -> Vector3:
 
 # --- Input & camera --------------------------------------------------------
 
+func _is_emulated(event: InputEvent) -> bool:
+	return event.device == InputEvent.DEVICE_ID_EMULATION
+
+
+func _orbit(rel: Vector2) -> void:
+	if cam_mode == CamMode.BRIDGE:
+		bridge_yaw -= rel.x * 0.004
+		bridge_pitch = clampf(bridge_pitch - rel.y * 0.004, -0.5, 0.7)
+	else:
+		cam_yaw -= rel.x * 0.004
+		cam_pitch = clampf(cam_pitch + rel.y * 0.004, 0.05, 1.45)
+
+
+func _zoom(factor: float) -> void:
+	cam_dist = clampf(cam_dist * factor, 25.0, 2500.0)
+
+
+func _cycle_camera() -> void:
+	cam_mode = ((cam_mode + 1) % CAM_NAMES.size()) as CamMode
+	var len_m := player.length_m
+	match cam_mode:
+		CamMode.CHASE:
+			cam_yaw = PI + 0.55
+			cam_pitch = 0.24
+			cam_dist = maxf(70.0, len_m * 1.15)
+		CamMode.BROADSIDE:
+			cam_yaw = PI * 0.5
+			cam_pitch = 0.12
+			cam_dist = maxf(80.0, len_m * 1.5)
+		CamMode.OVERHEAD:
+			cam_yaw = PI
+			cam_pitch = 1.3
+			cam_dist = maxf(120.0, len_m * 1.7)
+		CamMode.BRIDGE:
+			bridge_yaw = 0.0
+			bridge_pitch = 0.0
+
+
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
-		cam_yaw -= event.relative.x * 0.004
-		cam_pitch = clampf(cam_pitch + event.relative.y * 0.004, 0.05, 1.4)
-	elif event is InputEventMouseButton and event.pressed:
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			cam_dist = maxf(cam_dist * 0.9, 40.0)
-		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			cam_dist = minf(cam_dist * 1.1, 2500.0)
-	elif event is InputEventKey and event.pressed:
-		var k := (event as InputEventKey).keycode
-		if k >= KEY_F1 and k <= KEY_F7:
+	if player == null:
+		return
+	# Touch (real fingers only; emulated mouse events from touch are ignored here).
+	if event is InputEventScreenTouch:
+		var st := event as InputEventScreenTouch
+		if st.pressed:
+			if hud != null and hud.is_over_ui(st.position):
+				return
+			_touches[st.index] = st.position
+			_tap_start[st.index] = {"pos": st.position, "t": Time.get_ticks_msec()}
+			if _touches.size() == 2:
+				var ps: Array = _touches.values()
+				_pinch_last = (ps[0] as Vector2).distance_to(ps[1])
+		else:
+			if _tap_start.has(st.index):
+				var ts: Dictionary = _tap_start[st.index]
+				var moved := (ts["pos"] as Vector2).distance_to(st.position)
+				if moved < 14.0 and Time.get_ticks_msec() - int(ts["t"]) < 350 and _touches.size() == 1:
+					_designate_aim(st.position)
+			_touches.erase(st.index)
+			_tap_start.erase(st.index)
+		return
+	if event is InputEventScreenDrag:
+		var sd := event as InputEventScreenDrag
+		if not _touches.has(sd.index):
+			return
+		_touches[sd.index] = sd.position
+		if _touches.size() == 1:
+			_orbit(sd.relative)
+		elif _touches.size() == 2:
+			var ps2: Array = _touches.values()
+			var d: float = (ps2[0] as Vector2).distance_to(ps2[1])
+			if _pinch_last > 1.0 and d > 1.0:
+				_zoom(_pinch_last / d)
+			_pinch_last = d
+		return
+	if _is_emulated(event):
+		return
+	# Mouse.
+	if event is InputEventMouseMotion:
+		touch_aiming = false
+		if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+			_orbit((event as InputEventMouseMotion).relative)
+	elif event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		if mb.button_index == MOUSE_BUTTON_LEFT:
+			fire_held = mb.pressed
+		elif mb.pressed and mb.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_zoom(0.9)
+		elif mb.pressed and mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_zoom(1.1)
+	elif event is InputEventKey:
+		var ke := event as InputEventKey
+		var k := ke.keycode
+		if not ke.pressed:
+			if k == KEY_SPACE:
+				fire_held = false
+			return
+		if ke.echo:
+			return
+		if k == KEY_SPACE:
+			fire_held = true
+		elif ke.is_action_pressed("throttle_up"):
+			controls.step_engine(1)
+		elif ke.is_action_pressed("throttle_down"):
+			controls.step_engine(-1)
+		elif ke.is_action_pressed("rudder_left"):
+			controls.step_helm(1)
+		elif ke.is_action_pressed("rudder_right"):
+			controls.step_helm(-1)
+		elif k == KEY_X:
+			controls.center_helm()
+		elif k == KEY_C:
+			_cycle_camera()
+		elif k >= KEY_F1 and k <= KEY_F7:
 			ground_id = Battlegrounds.all_grounds()[k - KEY_F1]["id"]
 			get_tree().reload_current_scene()
 		elif k == KEY_BRACKETRIGHT or k == KEY_BRACKETLEFT:
@@ -267,75 +399,83 @@ func _physics_process(delta: float) -> void:
 	if _report_on:
 		_report(delta)
 	if not player.sunk:
-		player.throttle = clampf(player.throttle + Input.get_axis("throttle_down", "throttle_up") * 0.4 * delta, -0.3, 1.0)
-		player.rudder = Input.get_axis("rudder_left", "rudder_right") * -1.0
-		_update_aim_point()
-		if Input.is_action_pressed("fire_main"):
+		if touch_aiming:
+			aim_point = touch_aim_world
+		else:
+			_update_aim_point(get_viewport().get_mouse_position())
+		if fire_held:
 			(gunnery[player] as Gunnery).fire_at(aim_point, Vector3.ZERO)
-	_update_camera()
+	else:
+		fire_held = false
+	_update_camera(delta)
 	_update_hud()
 
 
-func _update_camera() -> void:
-	var focus := player.global_position + Vector3(0, 12, 0)
-	var dir := Vector3(sin(cam_yaw) * cos(cam_pitch), sin(cam_pitch), cos(cam_yaw) * cos(cam_pitch))
+func _update_camera(delta: float) -> void:
+	cam_heading = lerp_angle(cam_heading, player.heading, 1.0 - exp(-2.5 * delta))
+	if cam_mode == CamMode.BRIDGE:
+		var bp := player.global_position + Vector3(0, player.length_m * 0.05 + 6.0, 0)
+		for c in player.compartments:
+			if c.kind == Compartment.Kind.BRIDGE:
+				bp = player.to_global(c.center + Vector3(0, c.half_extents.y + 1.6, 0))
+				break
+		var a := player.heading + bridge_yaw
+		var look := Vector3(sin(a) * cos(bridge_pitch), sin(bridge_pitch), cos(a) * cos(bridge_pitch))
+		cam.global_position = bp
+		cam.look_at(bp + look * 100.0, Vector3.UP)
+		cam.fov = 70.0
+		return
+	cam.fov = 70.0
+	var focus_h := clampf(player.length_m * 0.04, 4.0, 14.0)
+	var focus := player.global_position + Vector3(0, focus_h, 0)
+	var yaw := cam_heading + cam_yaw
+	var dir := Vector3(sin(yaw) * cos(cam_pitch), sin(cam_pitch), cos(yaw) * cos(cam_pitch))
 	cam.global_position = focus + dir * cam_dist
 	cam.look_at(focus + Vector3(0, look_up, 0), Vector3.UP)
 
 
-func _update_aim_point() -> void:
-	var mp := get_viewport().get_mouse_position()
-	var from := cam.project_ray_origin(mp)
-	var dir := cam.project_ray_normal(mp)
+func _march(from: Vector3, dir: Vector3) -> Vector3:
 	# March the ray until it meets the terrain or the water.
 	var p := from
 	for _i in 600:
 		p += dir * 50.0
 		if p.y <= maxf(terrain.height_at(p.x, p.z), 0.0):
 			break
-	aim_point = p
+	return p
+
+
+func _update_aim_point(screen_pos: Vector2) -> void:
+	aim_point = _march(cam.project_ray_origin(screen_pos), cam.project_ray_normal(screen_pos))
+
+
+func _designate_aim(screen_pos: Vector2) -> void:
+	touch_aim_world = _march(cam.project_ray_origin(screen_pos), cam.project_ray_normal(screen_pos))
+	touch_aiming = true
+	# A tap also fires, so touch play needs no separate aim step.
+	if not player.sunk:
+		(gunnery[player] as Gunnery).fire_at(touch_aim_world, Vector3.ZERO)
 
 
 # --- HUD ----------------------------------------------------------------------
 
 func _build_hud() -> void:
-	var layer := CanvasLayer.new()
-	add_child(layer)
-	hud = Label.new()
-	hud.position = Vector2(16, 12)
-	hud.add_theme_font_size_override("font_size", 16)
-	hud.add_theme_color_override("font_shadow_color", Color.BLACK)
-	layer.add_child(hud)
+	hud = Hud.new()
+	add_child(hud)
+	hud.setup(player, gunnery[player], controls, terrain, String(Battlegrounds.get_ground(ground_id)["name"]), OPPONENTS)
+	hud.camera_pressed.connect(_cycle_camera)
+	hud.fire_changed.connect(func(held: bool) -> void: fire_held = held)
 
 
 func _update_hud() -> void:
 	var enemies := 0
+	var nearest: Ship = null
+	var best := INF
 	for n in get_tree().get_nodes_in_group("ships"):
 		var s := n as Ship
 		if s != null and not s.sunk and s.team != player.team:
 			enemies += 1
-	var turrets := player.gun_turrets()
-	var ok := 0
-	for t in turrets:
-		if t.is_functional():
-			ok += 1
-	var lines: Array[String] = []
-	lines.append("%s  [%s]  -  %s" % [player.display_name, player.nation, Battlegrounds.get_ground(ground_id)["name"]])
-	lines.append("Speed %.1f kts   Throttle %d%%   Hdg %d deg" % [absf(player.speed_ms) / 0.5144, player.throttle * 100.0, fposmod(rad_to_deg(player.heading), 360.0)])
-	lines.append("Propulsion %d%%   Steering %d%%   Flooding %.0f / %.0f t   List %.1f deg" % [
-		player.propulsion_fraction() * 100.0, player.steering_fraction() * 100.0, player.total_flooded_t,
-		player.reserve_buoyancy_t, rad_to_deg(player.list_rad)])
-	lines.append("Main battery %d / %d turrets   Hostiles afloat: %d / %d" % [ok, turrets.size(), enemies, OPPONENTS])
-	var hurt: Array[String] = []
-	for c in player.compartments:
-		if c.destroyed and c.kind != Compartment.Kind.HULL_SECTION:
-			hurt.append("%s: DESTROYED" % c.id)
-		elif c.on_fire:
-			hurt.append("%s: FIRE" % c.id)
-		elif c.flood_rate > 0.0 and c.flooded_tonnes < c.capacity_tonnes:
-			hurt.append("%s: FLOODING" % c.id)
-	if hurt.size() > 0:
-		lines.append("Damage control: " + ", ".join(hurt.slice(0, 8)))
-	if player.sunk:
-		lines.append("*** SHIP LOST ***  ([ / ] to pick a new ship, F1-F7 for a different battleground)")
-	hud.text = "\n".join(lines)
+			var d := s.global_position.distance_to(player.global_position)
+			if d < best:
+				best = d
+				nearest = s
+	hud.update_hud(aim_point, CAM_NAMES[cam_mode], enemies, nearest, not touch_aiming)

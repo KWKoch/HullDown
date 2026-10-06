@@ -42,9 +42,9 @@ const PRESETS := {
 	},
 	"night": {
 		"cloud_cover": 0.45, "cloud_dark": 0.3, "stars": 1.0,
-		"sky_top": Color(0.01, 0.02, 0.05), "sky_horizon": Color(0.06, 0.09, 0.16),
-		"sun_color": Color(0.6, 0.7, 1.0), "sun_energy": 0.35, "sun_pitch": -35.0, "sun_yaw": 140.0,
-		"ambient_energy": 0.7, "fog": Color(0.05, 0.07, 0.12), "fog_density": 0.00012, "exposure": 1.0,
+		"sky_top": Color(0.015, 0.03, 0.08), "sky_horizon": Color(0.11, 0.16, 0.27),
+		"sun_color": Color(0.6, 0.7, 1.0), "sun_energy": 1.5, "sun_pitch": -35.0, "sun_yaw": 140.0,
+		"ambient_energy": 1.25, "fog": Color(0.05, 0.07, 0.12), "fog_density": 0.00012, "exposure": 1.0,
 		"water_deep": Color(0.01, 0.02, 0.05), "water_shallow": Color(0.02, 0.05, 0.09), "chop": 0.9, "sun_spec": 0.3,
 	},
 }
@@ -245,6 +245,11 @@ static func build(parent: Node3D, preset_name: String, sea_size: Vector2, shadow
 	e.sky = sky
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	e.ambient_light_energy = p["ambient_energy"]
+	if preset_name == "night":
+		# A dark sky gives almost no ambient light, so give night a moonlit blue fill.
+		e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+		e.ambient_light_color = Color(0.30, 0.38, 0.58)
+		e.ambient_light_energy = 0.9
 	e.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	e.tonemap_exposure = p["exposure"]

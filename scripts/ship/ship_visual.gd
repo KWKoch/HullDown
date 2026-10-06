@@ -59,6 +59,34 @@ func setup(p_ship: Ship) -> void:
 		add_child(mi)
 		parts[c] = mi
 		_mats[c] = mat
+		if c.kind == Compartment.Kind.TURRET:
+			_add_barrels(mi, c, mat)
+
+
+## Gun barrels on a turret box: caliber and barrel count from the roster, pointing at the bow.
+func _add_barrels(turret: MeshInstance3D, c: Compartment, mat: Material) -> void:
+	var gun: Dictionary = Roster.get_entry(ship.class_id).get("main_gun", {})
+	var caliber_m: float = float(gun.get("caliber_mm", 100.0)) / 1000.0
+	var n: int = maxi(1, int(gun.get("barrels_per_turret", 1)))
+	# Only the main-battery turrets (the biggest ones) carry the full-length guns.
+	var length := clampf(caliber_m * 45.0, 2.0, 22.0)
+	var radius := maxf(caliber_m * 1.4, 0.08)      # outer barrel diameter is nearly 3x the bore
+	var width := c.half_extents.x * 2.0
+	var spacing := minf(width / (n + 1), caliber_m * 4.2)
+	for i in n:
+		var x := (float(i) - (n - 1) * 0.5) * spacing
+		var b := MeshInstance3D.new()
+		var cyl := CylinderMesh.new()
+		cyl.top_radius = radius * 0.65
+		cyl.bottom_radius = radius
+		cyl.height = length
+		cyl.radial_segments = 10
+		cyl.rings = 1
+		b.mesh = cyl
+		b.material_override = mat
+		b.rotation = Vector3(PI * 0.5 - 0.06, 0.0, 0.0)     # lay it along +Z, a touch of elevation
+		b.position = Vector3(x, c.half_extents.y * 0.25, c.half_extents.z + length * 0.5 - c.half_extents.z * 0.3)
+		turret.add_child(b)
 
 
 var _plumes: Dictionary = {}     ## Compartment -> Node3D (smoke/flame emitter)
