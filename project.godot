@@ -4,7 +4,7 @@ config_version=5
 [application]
 config/name="Hull Down"
 config/description="WWII naval combat. Squatch Squad Studios."
-run/main_scene="res://scenes/title_cinematic.tscn"
+run/main_scene="res://scenes/testbed.tscn"
 config/features=PackedStringArray("4.3", "Forward Plus")
 
 [autoload]
