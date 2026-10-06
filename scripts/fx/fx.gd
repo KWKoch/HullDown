@@ -102,10 +102,12 @@ static func _place(ctx: Node, p: Node3D, pos: Vector3, life: float) -> void:
 	p.global_position = pos
 	if p is CPUParticles3D:
 		(p as CPUParticles3D).emitting = true
+	var pid := p.get_instance_id()          # id, not the node: the node may be freed before the timer fires
 	var t := scn.get_tree().create_timer(life + 0.6)
 	t.timeout.connect(func() -> void:
-		if is_instance_valid(p):
-			p.queue_free())
+		var n := instance_from_id(pid)
+		if n != null:
+			n.queue_free())
 
 
 static func _flash(ctx: Node, pos: Vector3, energy: float, range_m: float, color: Color, dur: float) -> void:

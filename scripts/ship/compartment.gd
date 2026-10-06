@@ -1,7 +1,8 @@
 class_name Compartment
 extends RefCounted
 ## One individually damageable part or compartment of a ship.
-## Positions/sizes are in ship-local metres (x = starboard, y = up from keel, z = bow).
+## Positions/sizes are in ship-local metres in the standard ShipFrame: origin midships on the
+## centerline at the waterline, +Z bow, +X port, +Y up (y = -draft is the keel).
 
 enum Kind {
 	BOW, STERN, HULL_SECTION, ENGINE_ROOM, BOILER_ROOM, MAGAZINE, TURRET,
