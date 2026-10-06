@@ -435,10 +435,6 @@ func _physics_process(delta: float) -> void:
 		_sim_t += delta
 		if fmod(_sim_t, 10.0) < delta:
 			print("[stat %ds] shells %d  trails %d  hits on anyone %d  overpens %d  player damaged parts %d" % [int(_sim_t), get_tree().get_nodes_in_group("shells").size(), get_tree().get_nodes_in_group("trails").size(), Shell.total_hits, Ship.overpenetrations, _count_dead(player)])
-	if OS.get_cmdline_user_args().has("--snapcheck") and _sim_t_chk < 3.0:
-		_sim_t_chk += delta
-		if _sim_t_chk >= 3.0:
-			_snapcheck()
 	if not player.sunk:
 		if OS.get_cmdline_user_args().has("--autoaim"):
 			_autoaim()
@@ -456,19 +452,6 @@ func _physics_process(delta: float) -> void:
 
 
 ## Test aid (--autoaim): fire at the nearest hostile as a stationary world point, i.e. with no lead.
-func _snapcheck() -> void:
-	# Cast the camera ray at each hostile's hull: the aim point must land on the ship, not the water behind it.
-	for n in get_tree().get_nodes_in_group("ships"):
-		var sh := n as Ship
-		if sh == null or sh.team == player.team:
-			continue
-		var from := cam.global_position
-		var dir := (sh.global_position + Vector3(0, sh.top_y * 0.4, 0) - from).normalized()
-		var p := _march(from, dir)
-		var local := sh.to_local(p)
-		print("SNAPCHECK %s dist %.0f m: aim point %.0f m from ship centre, local y %.1f (water behind would be y 0)" % [sh.class_id, from.distance_to(sh.global_position), p.distance_to(sh.global_position), local.y])
-
-
 func _autoaim() -> void:
 	var best: Ship = null
 	for n in get_tree().get_nodes_in_group("ships"):
@@ -500,7 +483,6 @@ func _process(delta: float) -> void:
 
 
 var _shot_t := 0.0
-var _sim_t_chk := 0.0
 
 
 func _update_camera(delta: float) -> void:
@@ -527,51 +509,13 @@ func _update_camera(delta: float) -> void:
 
 
 func _march(from: Vector3, dir: Vector3) -> Vector3:
-	# March the ray until it meets the terrain or the water...
+	# Free fire: the aim point is wherever the ray meets the terrain or the water.
 	var p := from
-	var t_ground := 30000.0
-	for i in 600:
+	for _i in 600:
 		p += dir * 50.0
 		if p.y <= maxf(terrain.height_at(p.x, p.z), 0.0):
-			t_ground = (i + 1) * 50.0
 			break
-	# ...unless it meets a ship's hull or superstructure first: then the aim point snaps onto the ship.
-	var t_ship := _ray_ships(from, dir, t_ground)
-	if t_ship > 0.0:
-		return from + dir * t_ship
 	return p
-
-
-## Distance along a ray to the nearest ship (other than the player's) it passes through, or -1.
-func _ray_ships(from: Vector3, dir: Vector3, max_t: float) -> float:
-	var best := -1.0
-	for n in get_tree().get_nodes_in_group("ships"):
-		var sh := n as Ship
-		if sh == null or sh == player or sh.sunk:
-			continue
-		var o := sh.to_local(from)
-		var d := sh.global_transform.basis.inverse() * dir
-		var lo := Vector3(-sh.beam_m * 0.5, -sh.draft_m, -sh.length_m * 0.5)
-		var hi := Vector3(sh.beam_m * 0.5, sh.top_y, sh.length_m * 0.5)
-		var t0 := 0.0
-		var t1 := max_t
-		var ok := true
-		for ax in 3:
-			if absf(d[ax]) < 0.000001:
-				if o[ax] < lo[ax] or o[ax] > hi[ax]:
-					ok = false
-					break
-			else:
-				var ta: float = (lo[ax] - o[ax]) / d[ax]
-				var tb: float = (hi[ax] - o[ax]) / d[ax]
-				t0 = maxf(t0, minf(ta, tb))
-				t1 = minf(t1, maxf(ta, tb))
-				if t0 > t1:
-					ok = false
-					break
-		if ok and t0 > 0.0 and (best < 0.0 or t0 < best):
-			best = t0
-	return best
 
 
 func _update_aim_point(screen_pos: Vector2) -> void:

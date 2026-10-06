@@ -85,6 +85,32 @@ func battery_status(target: Vector3) -> Dictionary:
 	return {"total": total, "in_arc": in_arc, "aligned": aligned}
 
 
+## One entry per working or wrecked turret, bow to stern, for the reticle's fire-safety display:
+## state is READY (loaded, in arc, trained on the point), RELOAD, TRAINING (in arc, still swinging),
+## DEAD (the point is in this mount's dead zone) or OUT (destroyed / not functional).
+func turret_states(target: Vector3) -> Array:
+	var out: Array = []
+	for t in train:
+		var turret: Compartment = t
+		var e := {"z": turret.center.z, "state": "OUT", "reload": 0.0}
+		if turret.is_functional():
+			var sol := _solution(turret, target)
+			var total := reload_seconds() * (1.0 + (1.0 - turret.health_fraction()) * 1.5)
+			var left: float = reload_left.get(t, 0.0)
+			e["reload"] = clampf(1.0 - left / maxf(total, 0.1), 0.0, 1.0)
+			if not sol["in_arc"]:
+				e["state"] = "DEAD"
+			elif left > 0.0:
+				e["state"] = "RELOAD"
+			elif absf(float(train[t]) - float(sol["a"])) > ALIGN_TOL:
+				e["state"] = "TRAINING"
+			else:
+				e["state"] = "READY"
+		out.append(e)
+	out.sort_custom(func(a, b): return a["z"] > b["z"])
+	return out
+
+
 func _physics_process(delta: float) -> void:
 	for t in reload_left:
 		reload_left[t] = maxf(0.0, reload_left[t] - delta)

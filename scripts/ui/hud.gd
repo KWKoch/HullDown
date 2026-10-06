@@ -690,10 +690,58 @@ func _draw_reticle() -> void:
 		_reticle.draw_line(p + d * (r + 3.0), p + d * (r + 11.0), c, 2.0)
 	_reticle.draw_circle(p, 2.0, c)
 	var font := ThemeDB.fallback_font
+	_draw_battery_lamps(p, r)
 	var ts := font.get_string_size(_aim_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14)
 	var tp := p + Vector2(-ts.x * 0.5, r + 28.0)
 	_reticle.draw_string(font, tp + Vector2(1, 1), _aim_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0, 0, 0, 0.9))
 	_reticle.draw_string(font, tp, _aim_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, c)
+
+
+## A lamp per turret above the reticle, bow to stern: loaded and clear to fire (green), reloading
+## (amber, fills as it loads), swinging onto the aim point (blue) or the point is in its dead zone (red X).
+func _draw_battery_lamps(p: Vector2, r: float) -> void:
+	var states := gunnery.turret_states(_last_aim)
+	if states.is_empty():
+		return
+	var font := ThemeDB.fallback_font
+	var n := states.size()
+	var w := 24.0
+	var gap := 5.0
+	var x0 := p.x - (n * w + (n - 1) * gap) * 0.5
+	var y0 := p.y - r - 16.0 - w
+	var ready := 0
+	for i in n:
+		var e: Dictionary = states[i]
+		var box := Rect2(Vector2(x0 + i * (w + gap), y0), Vector2(w, w))
+		var st: String = e["state"]
+		_reticle.draw_rect(box, Color(0.03, 0.05, 0.08, 0.85))
+		var col := C_DIM
+		match st:
+			"READY":
+				col = C_GOOD
+				ready += 1
+				_reticle.draw_rect(box.grow(-3.0), col)
+			"RELOAD":
+				col = C_WARN
+				var fh := (w - 6.0) * float(e["reload"])
+				_reticle.draw_rect(Rect2(box.position + Vector2(3, w - 3.0 - fh), Vector2(w - 6.0, fh)), col)
+			"TRAINING":
+				col = C_NAV
+				_reticle.draw_rect(box.grow(-6.0), Color(col.r, col.g, col.b, 0.55))
+			"DEAD":
+				col = C_BAD
+				_reticle.draw_line(box.position + Vector2(4, 4), box.position + Vector2(w - 4, w - 4), col, 3.0)
+				_reticle.draw_line(box.position + Vector2(w - 4, 4), box.position + Vector2(4, w - 4), col, 3.0)
+			_:
+				_reticle.draw_line(box.position + Vector2(6, w * 0.5), box.position + Vector2(w - 6, w * 0.5), col, 2.0)
+		_reticle.draw_rect(box, col, false, 2.0)
+		var lbl := str(i + 1)
+		_reticle.draw_string(font, box.position + Vector2(w * 0.5 - 3.0, -3.0), lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1, 1, 1, 0.7))
+	var cap := "CLEAR TO FIRE" if ready == n else "%d/%d READY" % [ready, n]
+	var cc := C_GOOD if ready == n else (C_WARN if ready > 0 else C_BAD)
+	var cs := font.get_string_size(cap, HORIZONTAL_ALIGNMENT_LEFT, -1, 12)
+	_reticle.draw_string(font, Vector2(p.x - cs.x * 0.5 + 1, y0 - 13.0 + 1), cap, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0, 0, 0, 0.9))
+	_reticle.draw_string(font, Vector2(p.x - cs.x * 0.5, y0 - 13.0), cap, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, cc)
 
 
 ## Floating nameplates over every ship we can see: class icon, name and a health bar.
