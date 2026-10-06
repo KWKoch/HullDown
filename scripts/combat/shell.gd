@@ -79,6 +79,7 @@ func _check_hit(p: Vector3) -> bool:
 					print("FRIENDLY HIT: %s -> %s | shell y=%.0f age=%.1fs dist_from_shooter=%.0f m | shooter-victim sep=%.0f" % [
 						owner_ship.class_id, s.class_id, p.y, age, owner_ship.global_position.distance_to(p), owner_ship.global_position.distance_to(s.global_position)])
 			s.take_hit(p, hit)
+			Fx.impact(self, p, cal)
 			impact.emit(p, s, cal)
 			return true
 	# Terrain / seabed.
@@ -86,6 +87,7 @@ func _check_hit(p: Vector3) -> bool:
 		var h := terrain.height_at(p.x, p.z)
 		if p.y <= h:
 			terrain.apply_blast(p, float(spec.get("he_kg", spec["shell_kg"] * 0.1)), float(spec["caliber_mm"]), p.y)
+			Fx.dust(self, p, float(spec["caliber_mm"]))
 			terrain_hit.emit(p, spec["caliber_mm"])
 			return true
 	# Water surface. Deep water swallows the shell; in shallows it keeps going (slowed)
@@ -93,6 +95,7 @@ func _check_hit(p: Vector3) -> bool:
 	if p.y <= 0.0:
 		if not _entered_water:
 			_entered_water = true
+			Fx.splash(self, p, float(spec["caliber_mm"]))
 			splash.emit(p, spec["caliber_mm"])
 			velocity *= 0.35
 		var depth := 0.0

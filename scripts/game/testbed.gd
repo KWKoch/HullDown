@@ -12,9 +12,10 @@ var terrain: BattleTerrain
 var player: Ship
 var gunnery: Dictionary = {}       ## Ship -> Gunnery
 var cam: Camera3D
-var cam_yaw := 0.0
-var cam_pitch := 0.35
-var cam_dist := 220.0
+var cam_yaw := PI           ## chase view: camera behind the ship, looking forward
+var cam_pitch := 0.16
+var cam_dist := 170.0
+var look_up := 0.0           ## test option: raise the look-at point to inspect the sky
 var hud: Label
 var sun: DirectionalLight3D
 var env: WorldEnvironment
@@ -54,11 +55,22 @@ func _build_world() -> void:
 	var wi := cl.find("--weather")
 	if wi >= 0 and wi + 1 < cl.size():
 		weather = cl[wi + 1]
+	for k in ["--yaw", "--pitch", "--dist", "--lookup"]:
+		var ki := cl.find(k)
+		if ki >= 0 and ki + 1 < cl.size():
+			match k:
+				"--yaw": cam_yaw = deg_to_rad(float(cl[ki + 1]))
+				"--pitch": cam_pitch = deg_to_rad(float(cl[ki + 1]))
+				"--dist": cam_dist = float(cl[ki + 1])
+				"--lookup": look_up = float(cl[ki + 1])
 	var preset := SkySea.preset_for(tod, weather, float(ground["visibility_m"]))
 	var built := SkySea.build(self, preset, Vector2(240000, 240000))
 	sun = built["sun"]
 	env = WorldEnvironment.new()   # (the environment node lives inside SkySea's build; kept for API compatibility)
 	water = built["sea"]
+	var wx := Weather.new()
+	add_child(wx)
+	wx.setup(weather if weather in ["rain", "snow"] else "")
 	print("Sky preset: %s (time %.1f, weather %s)" % [preset, tod, weather])
 
 	cam = Camera3D.new()
@@ -109,6 +121,9 @@ func _spawn(class_id: String, team: int, pos: Vector3, is_player: bool) -> Ship:
 	var vis := ShipVisual.new()
 	s.add_child(vis)
 	vis.setup(s)
+	var wk := Wake.new()
+	s.add_child(wk)
+	wk.setup(s)
 	var g := Gunnery.new()
 	s.add_child(g)
 	g.setup(s)
@@ -265,7 +280,7 @@ func _update_camera() -> void:
 	var focus := player.global_position + Vector3(0, 12, 0)
 	var dir := Vector3(sin(cam_yaw) * cos(cam_pitch), sin(cam_pitch), cos(cam_yaw) * cos(cam_pitch))
 	cam.global_position = focus + dir * cam_dist
-	cam.look_at(focus, Vector3.UP)
+	cam.look_at(focus + Vector3(0, look_up, 0), Vector3.UP)
 
 
 func _update_aim_point() -> void:

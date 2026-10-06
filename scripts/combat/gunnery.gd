@@ -43,6 +43,7 @@ func fire_at(target_pos: Vector3, target_vel: Vector3) -> int:
 		var barrels: int = gun.get("barrels_per_turret", 1)
 		for b in barrels:
 			_spawn_shell(muzzle, aim, turret)
+		Fx.muzzle(ship, muzzle, aim, float(gun.get("caliber_mm", 100.0)))
 		# A damaged turret reloads slower; rpm is per barrel salvo.
 		var base := 60.0 / float(gun.get("rpm", 2.0))
 		reload_left[t] = base * (1.0 + (1.0 - turret.health_fraction()) * 1.5)

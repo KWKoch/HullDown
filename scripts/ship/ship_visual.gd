@@ -45,11 +45,25 @@ func setup(p_ship: Ship) -> void:
 		_mats[c] = mat
 
 
+var _plumes: Dictionary = {}     ## Compartment -> Node3D (smoke/flame emitter)
+
+
+func _plume(c: Compartment, mi: MeshInstance3D, on: bool) -> void:
+	if on and not _plumes.has(c):
+		var sz := clampf((c.half_extents.x + c.half_extents.z) * 0.5, 1.5, 9.0)
+		_plumes[c] = Fx.burning(self, c.center + Vector3(0, c.half_extents.y, 0), sz)
+	if _plumes.has(c):
+		var node: Node3D = _plumes[c]
+		for ch in node.get_children():
+			(ch as CPUParticles3D).emitting = on
+
+
 func _process(delta: float) -> void:
 	_t += delta
 	for c in parts:
 		var mi: MeshInstance3D = parts[c]
 		var mat: StandardMaterial3D = _mats[c]
+		_plume(c, mi, (c.on_fire or (c.destroyed and c.kind != Compartment.Kind.HULL_SECTION)) and not ship.sunk)
 		if c.destroyed:
 			mat.albedo_color = Color(0.06, 0.05, 0.05)
 			if c.kind in [Compartment.Kind.MAST, Compartment.Kind.FUNNEL, Compartment.Kind.TURRET]:

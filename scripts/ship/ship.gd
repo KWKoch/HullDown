@@ -210,6 +210,7 @@ func _magazine_explosion(c: Compartment) -> void:
 	var yield_kg := c.ammo_stored
 	c.ammo_stored = 0.0
 	Ship.explosions += 1
+	Fx.explosion(self, to_global(c.center), yield_kg)
 	magazine_detonated.emit(self, c)
 	# Intra-ship chain reaction: heavy damage to everything within ~25 m of the space.
 	var chain := {"damage": yield_kg * 0.6, "radius": 25.0, "pen_mm": 0, "dir": Vector3.DOWN}
