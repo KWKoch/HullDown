@@ -28,6 +28,7 @@ var _yaw_forced := false
 var look_up := 0.0           ## test option: raise the look-at point to inspect the sky
 var hud: Hud
 var controls: PlayerControls
+var peace := true           ## UI-testing mode: AI ships neither move nor fire. Use --hot for a live battle.
 var fire_held := false
 var touch_aim_world := Vector3.ZERO
 var touch_aiming := false
@@ -45,6 +46,7 @@ func _ready() -> void:
 	if args.size() > 0:
 		ground_id = args[0]
 	_report_on = args.has("--report")
+	peace = not (args.has("--hot") or args.has("--report") or args.has("--auto"))
 	_build_world()
 	_spawn_fleet()
 	_build_hud()
@@ -158,7 +160,7 @@ func _spawn(class_id: String, team: int, pos: Vector3, is_player: bool) -> Ship:
 	s.add_child(g)
 	g.setup(s)
 	gunnery[s] = g
-	if not is_player:
+	if not is_player and not peace:
 		var ai := AICaptain.new()
 		s.add_child(ai)
 		ai.setup(s, g)

@@ -17,7 +17,7 @@ const C_WARN := Color(1.00, 0.78, 0.25)
 const C_BAD := Color(1.00, 0.30, 0.28)
 const C_DIM := Color(0.62, 0.68, 0.72)
 const C_TEXT := Color(0.94, 0.96, 0.97)
-const SHOW_DAMAGE_PANEL := false     ## damage-control panel + ship schematic; hidden while the UI is being reworked
+const SHOW_DAMAGE_PANEL := true      ## damage-control panel + ship schematic
 const C_PANEL := Color(0.04, 0.06, 0.09, 0.72)
 
 var ship: Ship
