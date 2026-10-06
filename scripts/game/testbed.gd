@@ -177,6 +177,9 @@ func _spawn(class_id: String, team: int, pos: Vector3, is_player: bool) -> Ship:
 	s.setup_from_class(entry, team)
 	s.terrain = terrain
 	s.is_player = is_player
+	s.crew_skill = 1.0 if is_player else randf_range(0.7, 1.3)    # AI crews vary in efficacy
+	if s.dc != null:
+		s.dc.skill = 1.0
 	s.global_position = pos
 	s.add_to_group("ships")
 	var vis := ShipVisual.new()
@@ -339,6 +342,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			controls.step_helm(-1)
 		elif k == KEY_X:
 			controls.center_helm()
+		elif k == KEY_V:
+			if player.dc != null:
+				player.dc.cycle_priority()
 		elif k == KEY_C:
 			_cycle_camera()
 		elif k == KEY_M:
@@ -435,6 +441,9 @@ func _physics_process(delta: float) -> void:
 		_sim_t += delta
 		if fmod(_sim_t, 10.0) < delta:
 			print("[stat %ds] shells %d  trails %d  hits on anyone %d  overpens %d  player damaged parts %d" % [int(_sim_t), get_tree().get_nodes_in_group("shells").size(), get_tree().get_nodes_in_group("trails").size(), Shell.total_hits, Ship.overpenetrations, _count_dead(player)])
+	if OS.get_cmdline_user_args().has("--wound") and not _wounded:
+		_wounded = true
+		_wound()
 	if not player.sunk:
 		if OS.get_cmdline_user_args().has("--autoaim"):
 			_autoaim()
@@ -452,6 +461,14 @@ func _physics_process(delta: float) -> void:
 
 
 ## Test aid (--autoaim): fire at the nearest hostile as a stationary world point, i.e. with no lead.
+## Test aid (--wound): batter the player's ship at the waterline so damage control has work to do.
+func _wound() -> void:
+	for n in 7:
+		var side := 1.0 if n % 2 == 0 else -1.0
+		var pt := Vector3(side * player.beam_m * 0.5, -1.0, randf_range(-0.4, 0.4) * player.length_m)
+		player.take_hit(player.to_global(pt), {"pen_mm": 150.0, "damage": 900.0, "fuse_m": 5.0, "radius": 9.0, "dir": Vector3(-side, -0.1, 0.0)})
+
+
 func _autoaim() -> void:
 	var best: Ship = null
 	for n in get_tree().get_nodes_in_group("ships"):
@@ -483,6 +500,7 @@ func _process(delta: float) -> void:
 
 
 var _shot_t := 0.0
+var _wounded := false
 
 
 func _update_camera(delta: float) -> void:

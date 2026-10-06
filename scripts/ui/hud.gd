@@ -44,6 +44,8 @@ var _ui_controls: Array[Control] = []
 var _telegraph: DetentGauge
 var _helm: DetentGauge
 var _fire_button: Button
+var _dc_button: Button
+var _dc_seen := 0
 var _cam_button: Button
 var _compass: Control
 var _schematic: Control
@@ -197,6 +199,8 @@ func _build() -> void:
 	_row(dmg, "flooding", "FLOODING", C_DMG)
 	_row(dmg, "list", "LIST", C_DMG)
 	_row(dmg, "fires", "FIRES", C_DMG)
+	_row(dmg, "crew", "REPAIR PARTIES", C_DMG)
+	_row(dmg, "pumps", "PUMPS", C_DMG)
 	_schematic = Control.new()
 	_schematic.custom_minimum_size = Vector2(326, 250)
 	_schematic.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -338,6 +342,8 @@ func _build_controls() -> void:
 	_fire_button.add_theme_font_size_override("font_size", 20)
 	_fire_button.button_down.connect(func() -> void: fire_changed.emit(true))
 	_fire_button.button_up.connect(func() -> void: fire_changed.emit(false))
+	_dc_button = _btn("DAMAGE CONTROL: AUTO  [V]", Vector2(350, 40), Vector2(1920.0 - 14.0 - 350.0, 806.0), C_DMG)
+	_dc_button.pressed.connect(func() -> void: ship.dc.cycle_priority())
 	_cam_button = _btn("CAMERA: CHASE  [C]", Vector2(190, 50), Vector2(1920.0 - 14.0 - 190.0, 1080.0 - 14.0 - 50.0 - (128.0 if touch else 0.0)), C_NAV)
 	_cam_button.pressed.connect(func() -> void: camera_pressed.emit())
 
@@ -479,6 +485,16 @@ func _update_dmg() -> void:
 			_event("Flooding: " + c.id, C_DMG)
 		_flood_state[c.id] = flooding
 	_put("fires", "%d" % fires, C_GOOD if fires == 0 else (C_WARN if fires < 3 else C_BAD))
+	if ship.dc != null:
+		var dc := ship.dc
+		var busy := dc.parties.size() - dc.idle_parties()
+		_put("crew", "%d/%d busy  %d%%" % [busy, dc.parties.size(), int(dc.efficacy() * 100.0)], C_TEXT)
+		_put("pumps", "%.1f t/s" % dc.pumping_now if dc.pumping_now > 0.05 else "idle", C_GOOD if dc.pumping_now > 0.05 else C_DIM)
+		_dc_button.text = "DAMAGE CONTROL: %s  [V]" % dc.priority
+		var fresh := mini(dc.note_count - _dc_seen, dc.log.size())
+		for i in range(dc.log.size() - fresh, dc.log.size()):
+			_event(dc.log[i], C_GOOD)
+		_dc_seen = dc.note_count
 
 
 func _update_buttons() -> void:
@@ -738,7 +754,7 @@ func _draw_plates() -> void:
 		if p.x < -60 or p.y < -40 or p.x > vp.x + 60 or p.y > vp.y + 40:
 			continue
 		var covered := false
-		for r in [Rect2(700, 0, 520, 120), Rect2(1510, 320, 410, 440), Rect2(780, 820, 380, 260), Rect2(0, 760, 320, 320), Rect2(1700, 880, 220, 200)]:
+		for r in [Rect2(700, 0, 520, 120), Rect2(1510, 320, 410, 540), Rect2(780, 820, 380, 260), Rect2(0, 760, 320, 320), Rect2(1700, 880, 220, 200)]:
 			if (r as Rect2).has_point(p):
 				covered = true
 		if covered or (_big != null and _big.visible):

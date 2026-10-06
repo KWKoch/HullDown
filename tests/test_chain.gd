@@ -9,6 +9,7 @@ func _mk(class_id: String, team: int, pos: Vector3, ai := false, err := 0.0) -> 
 	var s := Ship.new()
 	add_child(s)
 	s.setup_from_class(Roster.get_entry(class_id), team)
+	s.damage_control_enabled = false      # these tests measure unattended fires and blasts
 	s.global_position = pos
 	s.add_to_group("ships")
 	var g := Gunnery.new()

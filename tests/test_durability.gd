@@ -34,6 +34,7 @@ func _trial(e: Dictionary, cal: float, kg: float) -> Array:
 	var s := Ship.new()
 	add_child(s)
 	s.setup_from_class(e, 0)
+	s.damage_control_enabled = false      # calibrate raw durability, without crew intervention
 	s.global_position = Vector3.ZERO
 	var had_guns := s.gun_turrets().size() > 0
 	var p_at := -1

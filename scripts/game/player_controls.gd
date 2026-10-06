@@ -66,4 +66,4 @@ func _physics_process(delta: float) -> void:
 			engine_answered = engine_ordered
 	ship.throttle = float(EngineTelegraph.ENGINE_ORDERS[engine_answered][1])
 	var target: float = EngineTelegraph.HELM_ORDERS[helm_ordered][1]
-	ship.rudder = move_toward(ship.rudder, target, EngineTelegraph.RUDDER_RATE * delta)
+	ship.rudder = move_toward(ship.rudder, target, EngineTelegraph.RUDDER_RATE * ship.handling_fraction() * delta)

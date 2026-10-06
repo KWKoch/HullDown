@@ -303,7 +303,7 @@ func _spawn_shell(muzzle: Vector3, dir: Vector3, turret: Compartment, salvo_yaw:
 	# Shot-to-shot scatter grows with a damaged mount, a ship at speed and a ship turning hard.
 	var motion := 1.0 + 0.6 * clampf(absf(ship.speed_ms) / maxf(ship.max_speed_ms, 1.0), 0.0, 1.0) \
 			+ 0.8 * absf(ship.rudder) * clampf(absf(ship.speed_ms) / maxf(ship.max_speed_ms, 1.0), 0.0, 1.0)
-	var wear := 1.0 + (1.0 - turret.health_fraction())
+	var wear := 1.0 + (1.0 - turret.health_fraction()) + 3.0 * absf(ship.list_rad)    # a listing ship shoots worse
 	var spread := deg_to_rad(dispersion_deg) * wear * motion
 	var d := dir
 	d = d.rotated(Vector3.UP, salvo_yaw * motion + randfn(0.0, spread))

@@ -53,6 +53,9 @@ const DURABILITY := {
 	"battlecruiser": 5.4, "battleship": 6.0, "carrier": 5.0, "submarine": 3.0,
 }
 static var overpenetrations := 0
+var crew_skill: float = 1.0          ## damage-control crew efficacy (captain type feeds this)
+var dc: DamageControl
+var damage_control_enabled := true
 var top_y: float = 20.0              ## local height of the highest compartment (hit ceiling)
 
 const COOKOFF_SECONDS := 14.0       ## fire exposure that sets off an unprotected ammo space
@@ -80,6 +83,8 @@ func setup_from_class(entry: Dictionary, p_team: int) -> void:
 		top_y = maxf(top_y, c.center.y + c.half_extents.y)
 	top_y += 4.0                      # masts / rigging above the highest compartment
 	scale = Vector3.ONE * WORLD_SCALE
+	dc = DamageControl.new()
+	dc.setup(self, crew_skill)
 
 
 ## World-space dimensions (what the eye and the sensors see).
@@ -111,6 +116,18 @@ func _count_functional(kind: Compartment.Kind) -> Vector2:
 			if c.is_functional():
 				ok += 1
 	return Vector2(ok, total)
+
+
+## 0..1: how much of the ship's reserve buoyancy is gone to flooding.
+func flood_ratio() -> float:
+	return clampf(total_flooded_t / maxf(reserve_buoyancy_t, 1.0), 0.0, 1.0)
+
+
+## 0.25..1: how well the ship answers her helm and holds her way. A ship full of water is
+## sluggish and wallows; a heavily listing one barely turns.
+func handling_fraction() -> float:
+	var list_f := clampf(absf(list_rad) / 0.4, 0.0, 1.0)
+	return clampf(1.0 - 0.5 * flood_ratio() - 0.3 * list_f, 0.25, 1.0)
 
 
 ## 0..1 overall condition: surviving hit points, discounted by flooding. Used for target
@@ -360,6 +377,8 @@ func _physics_process(delta: float) -> void:
 
 
 func _damage_control(delta: float) -> void:
+	if damage_control_enabled and dc != null:
+		dc.update(delta)
 	total_flooded_t = 0.0
 	var hazard := 0.0
 	var port_water := 0.0
@@ -401,9 +420,25 @@ func _damage_control(delta: float) -> void:
 		else:
 			aft_water += c.flooded_tonnes
 	hazard_r = hazard
+	_progressive_flooding(delta)
 	var gm := maxf(beam_m * 0.08 * displacement_t, 1.0)
 	list_rad = lerpf(list_rad, clampf((stbd_water - port_water) / gm, -0.6, 0.6), delta)
 	trim_rad = lerpf(trim_rad, clampf((fwd_water - aft_water) / (length_m * 40.0), -0.35, 0.35), delta)
+
+
+## A space that is nearly full of water pushes it through the bulkheads into its neighbours below the
+## waterline, slowly: flooding spreads unless the inflow is stopped and the water pumped out.
+func _progressive_flooding(delta: float) -> void:
+	if randf() > 2.0 * delta:
+		return                              # evaluated ~twice a second
+	for c in compartments:
+		if not c.below_waterline or c.flooded_tonnes < c.capacity_tonnes * 0.85 or c.flood_rate <= 0.0:
+			continue
+		for n in compartments:
+			if n == c or not n.below_waterline or n.flood_rate > 0.0 or n.flooded_tonnes >= n.capacity_tonnes:
+				continue
+			if c.distance_to(n.center) < 4.0 and not n.destroyed:
+				n.flood_rate = 0.3 + n.capacity_tonnes * 0.002
 
 
 ## Burning spaces heat neighbours; ammunition and fuel nearby can catch.
@@ -417,12 +452,13 @@ func _spread_fire(src: Compartment, delta: float) -> void:
 
 
 func _move(delta: float) -> void:
-	var target := throttle * max_speed_ms * propulsion_fraction()
-	var accel := 0.04 * max_speed_ms * (1.0 + propulsion_fraction())
+	var list_drag := 1.0 - 0.25 * clampf(absf(list_rad) / 0.4, 0.0, 1.0)     # a heeled hull plough through the water
+	var target := throttle * max_speed_ms * propulsion_fraction() * list_drag
+	var accel := 0.04 * max_speed_ms * (1.0 + propulsion_fraction()) * (1.0 - 0.5 * flood_ratio())
 	speed_ms = move_toward(speed_ms, target, accel * delta)
 	var steer := rudder * steering_fraction()
 	var speed_factor := clampf(absf(speed_ms) / maxf(max_speed_ms, 0.01), 0.0, 1.0)
-	heading += steer * turn_rate_rad * speed_factor * delta * signf(speed_ms if speed_ms != 0.0 else 1.0)
+	heading += steer * turn_rate_rad * handling_fraction() * speed_factor * delta * signf(speed_ms if speed_ms != 0.0 else 1.0)
 	var fwd := Vector3(sin(heading), 0.0, cos(heading))
 	global_position += fwd * speed_ms * delta
 	rotation = Vector3(trim_rad, heading, list_rad)
