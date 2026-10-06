@@ -65,6 +65,10 @@ func _draw() -> void:
 		draw_line(o, o + Vector2(d.x * bl, 0), C_ACCENT, 1.5)
 		draw_line(o, o + Vector2(0, d.y * bl), C_ACCENT, 1.5)
 	_draw_profile()
+	var chx := 10.0
+	for st in StatusIcons.compute(ship):
+		StatusIcons.draw(self, Vector2(chx, 8.0), 17.0, st, _t)
+		chx += 20.0
 	_draw_cups(PROFILE_H + 14.0)
 	_draw_figures(PROFILE_H + 14.0 + 30.0)
 

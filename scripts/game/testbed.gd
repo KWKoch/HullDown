@@ -482,6 +482,19 @@ func _physics_process(delta: float) -> void:
 ## Test aid (--autoaim): fire at the nearest hostile as a stationary world point, i.e. with no lead.
 ## Test aid (--wound): batter the player's ship at the waterline so damage control has work to do.
 func _wound() -> void:
+	if OS.get_cmdline_user_args().has("--cripple"):
+		var victims: Array = [player]
+		if OS.get_cmdline_user_args().has("--cripple-foes"):
+			victims = get_tree().get_nodes_in_group("ships").filter(func(n): return (n as Ship).team != player.team)
+		for v in victims:
+			var vs := v as Ship
+			for c in vs.compartments:
+				if c.kind in [Compartment.Kind.RUDDER, Compartment.Kind.STEERING_GEAR, Compartment.Kind.SCREW, Compartment.Kind.MAGAZINE, Compartment.Kind.TURRET]:
+					c.hp = 0.0
+					c.destroyed = true
+					if c.kind == Compartment.Kind.MAGAZINE:
+						c.on_fire = true
+			vs.list_rad = deg_to_rad(9.0)
 	for n in 7:
 		var side := 1.0 if n % 2 == 0 else -1.0
 		var pt := Vector3(side * player.beam_m * 0.5, -1.0, randf_range(-0.4, 0.4) * player.length_m)

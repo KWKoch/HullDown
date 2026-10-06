@@ -678,7 +678,11 @@ func _draw_battery_lamps(p: Vector2, r: float) -> void:
 
 
 ## Floating nameplates over every ship we can see: class icon, name and a health bar.
+var _plate_t := 0.0
+
+
 func _draw_plates() -> void:
+	_plate_t = Time.get_ticks_msec() / 1000.0
 	if camera == null or sensors == null or ship == null:
 		return
 	var font := ThemeDB.fallback_font
@@ -724,3 +728,9 @@ func _draw_plates() -> void:
 		_plates.draw_rect(Rect2(bar.position, Vector2(bar.size.x * integ, bar.size.y)), _status_color(integ))
 		_plates.draw_rect(bar, Color(0, 0, 0, 0.8), false, 1.0)
 		_plates.draw_line(p + Vector2(0, -4), p, Color(col.r, col.g, col.b, 0.7), 1.0)
+		# Status chips under the plate: fire, flooding, list, lost steering/power/guns.
+		var chips := StatusIcons.compute(s)
+		var cx := top.x + 26.0
+		for st in chips:
+			StatusIcons.draw(_plates, Vector2(cx, top.y + 28.0), 17.0, st, _plate_t)
+			cx += 20.0
