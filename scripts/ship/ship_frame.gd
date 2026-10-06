@@ -128,26 +128,42 @@ func half_width_at(z: float, y: float) -> float:
 	return hb * (1.0 - 0.72 * pow(d, 2.4))
 
 
-## Builds the hull as a single smooth mesh (vertex-coloured: red below the waterline, grey above).
+## Builds the hull as a single mesh: a lofted skin with a raked, flared bow, a boot-topping stripe at the
+## waterline, a red bottom, a deck, bulwarks along the edge and rows of portholes.
 func hull_mesh(topside: Color = Color(0.46, 0.49, 0.51), bottom: Color = Color(0.36, 0.13, 0.11),
 		deck_color: Color = Color(0.34, 0.33, 0.31)) -> ArrayMesh:
-	var stations := 40
-	var level_fracs := [-1.0, -0.9, -0.7, -0.45, -0.2, 0.0]     # fractions of draft below the waterline (keel first)
+	var stations := 64
+	var boot_dn := minf(0.45, draft * 0.12)
+	var boot_up := clampf(freeboard * 0.12, 0.3, 0.9)
+	var level_fracs := [-1.0, -0.9, -0.72, -0.5, -0.3]
+	var boot := Color(0.10, 0.10, 0.11)
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	# Ring per station: starboard top -> keel -> port top (open at the top; the deck closes it).
 	var rings: Array = []
+	var rake := length * 0.028
 	for i in stations:
 		var z := -length * 0.5 + length * float(i) / (stations - 1)
 		var top := deck_y(z)
+		var u := clampf(z / (length * 0.5), -1.0, 1.0)
 		var ys: Array[float] = []
 		for fr in level_fracs:
 			ys.append(fr * draft)
-		ys.append(top * 0.5)
+		ys.append(-boot_dn)
+		ys.append(0.0)
+		ys.append(boot_up)
+		if top * 0.55 > boot_up + 0.4:
+			ys.append(top * 0.55)
 		ys.append(top)
 		var port: Array[Vector3] = []
 		for y in ys:
-			port.append(Vector3(half_width_at(z, y), y, z))
+			var zz := z
+			var yy := clampf(y / maxf(top, 0.1), 0.0, 1.0)
+			if u > 0.5:
+				var t := (u - 0.5) / 0.5
+				zz += rake * t * t * (3.0 - 2.0 * t) * yy        # the stem leans forward with height (flared bow)
+			elif u < -0.85:
+				zz -= length * 0.008 * yy                       # a touch of counter-stern overhang
+			port.append(Vector3(half_width_at(z, y), y, zz))
 		var ring: Array[Vector3] = []
 		for k in range(port.size() - 1, -1, -1):
 			var p := port[k]
@@ -156,21 +172,28 @@ func hull_mesh(topside: Color = Color(0.46, 0.49, 0.51), bottom: Color = Color(0
 			ring.append(port[k])                                # port, keel up to top
 		rings.append(ring)
 	var n: int = (rings[0] as Array).size()
-	# Sides.
+	# Sides: colour by height band.
 	for i in stations - 1:
 		for j in n - 1:
 			var a: Vector3 = rings[i][j]
 			var b: Vector3 = rings[i + 1][j]
 			var c: Vector3 = rings[i + 1][j + 1]
 			var d: Vector3 = rings[i][j + 1]
-			_quad(st, a, b, c, d, true, topside, bottom)
-	# Deck.
+			var ym := (a.y + b.y + c.y + d.y) * 0.25
+			var col := topside
+			if ym < -boot_dn:
+				col = bottom
+			elif ym < boot_up:
+				col = boot
+			_quad(st, a, b, c, d, true, col)
+	# Deck, with faint alternating planking bands.
 	for i in stations - 1:
-		var ps: Vector3 = rings[i][0]            # starboard top
-		var pp: Vector3 = rings[i][n - 1]        # port top
+		var ps: Vector3 = rings[i][0]
+		var pp: Vector3 = rings[i][n - 1]
 		var ns: Vector3 = rings[i + 1][0]
 		var np: Vector3 = rings[i + 1][n - 1]
-		_quad(st, ps, ns, np, pp, false, deck_color, deck_color, Vector3.UP)
+		var dc := deck_color.lightened(0.025) if (i / 2) % 2 == 0 else deck_color
+		_quad(st, ps, ns, np, pp, false, dc, Vector3.UP)
 	# End caps (transom aft, stem forward).
 	for end in [0, stations - 1]:
 		var ring: Array = rings[end]
@@ -182,19 +205,40 @@ func hull_mesh(topside: Color = Color(0.46, 0.49, 0.51), bottom: Color = Color(0
 		for k in ring.size():
 			var p0: Vector3 = ring[k]
 			var p1: Vector3 = ring[(k + 1) % ring.size()]
-			_tri(st, mid, p0, p1, hint, topside, bottom, true)
+			_tri(st, mid, p0, p1, hint, topside, true)
+	# Bulwarks (a low wall along the deck edge) and portholes in the topsides.
+	if length > 40.0:
+		var bh := clampf(freeboard * 0.12, 0.6, 1.1)
+		for side in [1.0, -1.0]:
+			for i in stations - 1:
+				var ra: Vector3 = rings[i][n - 1] if side > 0.0 else rings[i][0]
+				var rb: Vector3 = rings[i + 1][n - 1] if side > 0.0 else rings[i + 1][0]
+				var inset := 0.18
+				var ra_in := Vector3(ra.x - side * inset, ra.y, ra.z)
+				var rb_in := Vector3(rb.x - side * inset, rb.y, rb.z)
+				var up := Vector3(0, bh, 0)
+				var out := Vector3(side, 0, 0)
+				_quad(st, ra, rb, rb + up, ra + up, true, topside, out)                              # outer face
+				_quad(st, ra_in, rb_in, rb_in + up, ra_in + up, true, topside.darkened(0.12), -out)  # inner face
+				_quad(st, ra + up, rb + up, rb_in + up, ra_in + up, false, topside.lightened(0.12), Vector3.UP)  # cap
+		var port_dark := Color(0.04, 0.05, 0.06)
+		var step := 3
+		for i in range(2, stations - 2, step):
+			var z0: float = rings[i][n - 1].z
+			var yh := freeboard * 0.55
+			if yh < 1.2:
+				continue
+			var xw := half_width_at(z0, yh) + 0.03
+			var zr := length * 0.0022
+			var yr := minf(0.35, freeboard * 0.06)
+			for side in [1.0, -1.0]:
+				var q := [Vector3(side * xw, yh - yr, z0 - zr), Vector3(side * xw, yh - yr, z0 + zr), Vector3(side * xw, yh + yr, z0 + zr), Vector3(side * xw, yh + yr, z0 - zr)]
+				_quad(st, q[0], q[1], q[2], q[3], false, port_dark, Vector3(side, 0, 0))
 	st.generate_normals()
 	return st.commit()
 
 
-func _vcol(p: Vector3, topside: Color, bottom: Color) -> Color:
-	if p.y >= 0.0:
-		return topside
-	return bottom.lerp(topside, clampf(1.0 + p.y / 0.4, 0.0, 1.0) * 0.0)
-
-
-func _tri(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, hint: Vector3, topside: Color, bottom: Color,
-		smooth: bool) -> void:
+func _tri(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, hint: Vector3, col: Color, smooth: bool) -> void:
 	# Godot front faces wind clockwise: if the counter-clockwise normal points along `hint`, swap.
 	var n := (b - a).cross(c - a)
 	var pts: Array[Vector3] = [a, b, c]
@@ -202,16 +246,16 @@ func _tri(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, hint: Vector3, to
 		pts = [a, c, b]
 	st.set_smooth_group(0 if smooth else -1)
 	for p in pts:
-		st.set_color(_vcol(p, topside, bottom))
+		st.set_color(col)
 		st.add_vertex(p)
 
 
-func _quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3, side: bool, topside: Color,
-		bottom: Color, hint_override: Vector3 = Vector3.ZERO) -> void:
+func _quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3, side: bool, col: Color,
+		hint_override: Vector3 = Vector3.ZERO) -> void:
 	var centre := (a + b + c + d) * 0.25
 	var hint := hint_override
 	if hint == Vector3.ZERO:
 		hint = centre - Vector3(0.0, (deck_y(centre.z) - draft) * 0.5, centre.z)   # away from the keel-deck axis
 		hint.z = 0.0
-	_tri(st, a, b, c, hint, topside, bottom, side)
-	_tri(st, a, c, d, hint, topside, bottom, side)
+	_tri(st, a, b, c, hint, col, side)
+	_tri(st, a, c, d, hint, col, side)

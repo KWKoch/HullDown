@@ -24,7 +24,7 @@ func _init() -> void:
 
 
 ## `aim` is the world aim point; `sigma` the 1-sigma scatter (range, deflection) in metres there.
-func update_for(aim: Vector3, shooter: Ship, sigma: Vector2, col: Color, terrain: BattleTerrain) -> void:
+func update_for(aim: Vector3, shooter: Ship, sigma: Vector2, col: Color, terrain: BattleTerrain, tof: float = -1.0) -> void:
 	_mesh.clear_surfaces()
 	var cam := get_viewport().get_camera_3d()
 	if cam == null or shooter == null or shooter.sunk:
@@ -75,6 +75,71 @@ func update_for(aim: Vector3, shooter: Ship, sigma: Vector2, col: Color, terrain
 		_tri(p0 - side, p0 + side, p1 + side, y, ring_col, ring_col, ring_col)
 		_tri(p0 - side, p1 + side, p1 - side, y, ring_col, ring_col, ring_col)
 	_mesh.surface_end()
+	if tof > 0.5:
+		_arc(aim, shooter, cam, terrain, tof)
+
+
+## The shell's flight path from the guns to the aim point, so you can see what it will clear: a soft
+## white ribbon that turns red where the path dips below the terrain.
+func _arc(aim: Vector3, shooter: Ship, cam: Camera3D, terrain: BattleTerrain, tof: float) -> void:
+	var from := shooter.global_position + Vector3(0, shooter.top_y * 0.5 * Ship.WORLD_SCALE + 6.0, 0)
+	var rise := 0.5 * Shell.GRAVITY * tof * tof
+	var n := 64
+	var pts: Array[Vector3] = []
+	var hit := -1
+	for i in n + 1:
+		var u := float(i) / n
+		var pt := from.lerp(aim, u)
+		pt.y += rise * u * (1.0 - u)
+		pts.append(pt)
+		if hit < 0 and terrain != null and i > 2 and i < n - 1 and terrain.height_at(pt.x, pt.z) > pt.y:
+			hit = i
+	var right_hint := cam.global_transform.basis.x
+	_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	var prev_l := Vector3.ZERO
+	var prev_r := Vector3.ZERO
+	var prev_c := Color.WHITE
+	for i in pts.size():
+		var tan: Vector3 = (pts[mini(i + 1, n)] - pts[maxi(i - 1, 0)]).normalized()
+		var side := tan.cross((cam.global_position - pts[i]).normalized())
+		if side.length() < 0.001:
+			side = right_hint
+		var dd := cam.global_position.distance_to(pts[i])
+		var hw := clampf(dd * 0.0011, 0.25, 9.0)
+		side = side.normalized() * hw
+		var blocked := hit >= 0 and i >= hit
+		var base := Color(1.0, 0.3, 0.25) if blocked else Color(1, 1, 1)
+		var al := 0.2 + 0.55 * float(i) / n
+		var cc := Color(base.r, base.g, base.b, al)
+		var l := pts[i] - side
+		var r := pts[i] + side
+		if i > 0:
+			_tri3(prev_l, prev_r, r, prev_c, prev_c, cc)
+			_tri3(prev_l, r, l, prev_c, cc, cc)
+		prev_l = l
+		prev_r = r
+		prev_c = cc
+	_mesh.surface_end()
+	if hit >= 0:
+		# A small diamond where the path meets the ground.
+		var h := pts[hit]
+		var q := clampf(cam.global_position.distance_to(h) * 0.01, 2.0, 60.0)
+		var red := Color(1.0, 0.3, 0.25, 0.9)
+		_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+		var ax := cam.global_transform.basis.x * q
+		var ay := cam.global_transform.basis.y * q
+		_tri3(h + ax, h + ay, h - ax, red, red, red)
+		_tri3(h + ax, h - ax, h - ay, red, red, red)
+		_mesh.surface_end()
+
+
+func _tri3(a: Vector3, b: Vector3, c: Vector3, ca: Color, cb: Color, cc: Color) -> void:
+	_mesh.surface_set_color(ca)
+	_mesh.surface_add_vertex(a)
+	_mesh.surface_set_color(cb)
+	_mesh.surface_add_vertex(b)
+	_mesh.surface_set_color(cc)
+	_mesh.surface_add_vertex(c)
 
 
 func _tri(p0: Vector2, p1: Vector2, p2: Vector2, y: float, c0: Color, c1: Color, c2: Color) -> void:

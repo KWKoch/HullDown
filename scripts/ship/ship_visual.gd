@@ -29,64 +29,54 @@ const INTERNAL := [Compartment.Kind.ENGINE_ROOM, Compartment.Kind.BOILER_ROOM, C
 const STRUCT := [Compartment.Kind.HULL_SECTION, Compartment.Kind.BOW, Compartment.Kind.STERN]
 
 
+static var _hull_cache := {}
+
+
 func setup(p_ship: Ship) -> void:
 	ship = p_ship
-	# One smooth lofted hull from the standard frame (red below the waterline, grey above).
-	var frame := ShipFrame.for_entry(Roster.get_entry(ship.class_id))
+	var entry := Roster.get_entry(ship.class_id)
+	var frame := ShipFrame.for_entry(entry)
+	var pal := ShipParts.palette(String(entry.get("nation", "USA")))
+	# One lofted hull from the standard frame.
+	if not _hull_cache.has(ship.class_id):
+		_hull_cache[ship.class_id] = frame.hull_mesh(pal["hull"], Color(0.34, 0.12, 0.10), pal["deck"])
 	var hull := MeshInstance3D.new()
-	hull.mesh = frame.hull_mesh()
+	hull.mesh = _hull_cache[ship.class_id]
 	var hm := StandardMaterial3D.new()
 	hm.vertex_color_use_as_albedo = true
-	hm.roughness = 0.75
+	hm.roughness = 0.78
 	hm.cull_mode = BaseMaterial3D.CULL_DISABLED
 	hull.material_override = hm
 	add_child(hull)
+	# Static deck furniture, ensign, hull number and name.
+	var decor := MeshInstance3D.new()
+	decor.mesh = ShipDecor.mesh_for(ship.class_id, entry, frame, ship.compartments)
+	decor.material_override = hm
+	add_child(decor)
+	for lab in ShipDecor.labels(entry, frame):
+		add_child(lab)
 	for c in ship.compartments:
 		if c.kind in INTERNAL:
 			continue                     # hidden inside the hull; still simulated
 		var mi := MeshInstance3D.new()
-		var box := BoxMesh.new()
-		box.size = c.half_extents * 2.0
-		mi.mesh = box
 		mi.position = c.center
+		var mat := StandardMaterial3D.new()
+		mat.vertex_color_use_as_albedo = true
+		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		mat.roughness = 0.72
 		if c.kind in STRUCT:
+			var box := BoxMesh.new()
+			box.size = c.half_extents * 2.0
+			mi.mesh = box
 			mi.scale = Vector3(0.9, 1.0, 0.97)
 			mi.visible = false           # hull sections only show as dark wounds once damaged
-		var mat := StandardMaterial3D.new()
-		mat.albedo_color = COLORS.get(c.kind, Color(0.4, 0.4, 0.4))
-		mat.roughness = 0.8
+			mat.vertex_color_use_as_albedo = false
+		else:
+			mi.mesh = ShipParts.part_mesh(ship.class_id, c, entry, frame)
 		mi.material_override = mat
 		add_child(mi)
 		parts[c] = mi
 		_mats[c] = mat
-		if c.kind == Compartment.Kind.TURRET:
-			_add_barrels(mi, c, mat)
-
-
-## Gun barrels on a turret box: caliber and barrel count from the roster, pointing at the bow.
-func _add_barrels(turret: MeshInstance3D, c: Compartment, mat: Material) -> void:
-	var gun: Dictionary = Roster.get_entry(ship.class_id).get("main_gun", {})
-	var caliber_m: float = float(gun.get("caliber_mm", 100.0)) / 1000.0
-	var n: int = maxi(1, int(gun.get("barrels_per_turret", 1)))
-	# Only the main-battery turrets (the biggest ones) carry the full-length guns.
-	var length := clampf(caliber_m * 45.0, 2.0, 22.0)
-	var radius := maxf(caliber_m * 1.4, 0.08)      # outer barrel diameter is nearly 3x the bore
-	var width := c.half_extents.x * 2.0
-	var spacing := minf(width / (n + 1), caliber_m * 4.2)
-	for i in n:
-		var x := (float(i) - (n - 1) * 0.5) * spacing
-		var b := MeshInstance3D.new()
-		var cyl := CylinderMesh.new()
-		cyl.top_radius = radius * 0.65
-		cyl.bottom_radius = radius
-		cyl.height = length
-		cyl.radial_segments = 10
-		cyl.rings = 1
-		b.mesh = cyl
-		b.material_override = mat
-		b.rotation = Vector3(PI * 0.5 - 0.06, 0.0, 0.0)     # lay it along +Z, a touch of elevation
-		b.position = Vector3(x, c.half_extents.y * 0.25, c.half_extents.z + length * 0.5 - c.half_extents.z * 0.3)
-		turret.add_child(b)
 
 
 var _plumes: Dictionary = {}     ## Compartment -> Node3D (smoke/flame emitter)
@@ -126,5 +116,4 @@ func _process(delta: float) -> void:
 		else:
 			mat.emission_enabled = false
 			var damage: float = 1.0 - c.health_fraction()
-			var base: Color = COLORS.get(c.kind, Color(0.4, 0.4, 0.4))
-			mat.albedo_color = base.lerp(Color(0.1, 0.08, 0.07), damage * 0.8)
+			mat.albedo_color = Color.WHITE.lerp(Color(0.16, 0.13, 0.12), damage * 0.8)

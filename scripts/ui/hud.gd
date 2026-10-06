@@ -194,7 +194,7 @@ func _build() -> void:
 	# Own-ship condition: broadside profile, repair-party hats and two lines of figures (top right).
 	_profile = ShipProfile.new()
 	_profile.ship = ship
-	_profile.position = Vector2(1920.0 - 14.0 - ShipProfile.W, 14.0)
+	_profile.position = Vector2(1920.0 - 14.0 - ShipProfile.W - (202.0 if (DisplayServer.is_touchscreen_available() or OS.get_cmdline_user_args().has("--touchui")) else 0.0), 1080.0 - 12.0 - ShipProfile.H)
 	_profile.clicked.connect(func() -> void: ship.dc.cycle_priority())
 	add_child(_profile)
 	_ui_controls.append(_profile)
@@ -333,7 +333,7 @@ func _build_controls() -> void:
 	_fire_button.add_theme_font_size_override("font_size", 20)
 	_fire_button.button_down.connect(func() -> void: fire_changed.emit(true))
 	_fire_button.button_up.connect(func() -> void: fire_changed.emit(false))
-	_cam_button = _btn("CAMERA: CHASE  [C]", Vector2(190, 50), Vector2(1920.0 - 14.0 - 190.0, 1080.0 - 14.0 - 50.0 - (128.0 if touch else 0.0)), C_NAV)
+	_cam_button = _btn("CAMERA: CHASE  [C]", Vector2(190, 50), Vector2(1920.0 - 14.0 - 190.0, 14.0), C_NAV)
 	_cam_button.pressed.connect(func() -> void: camera_pressed.emit())
 
 
@@ -695,7 +695,7 @@ func _draw_plates() -> void:
 		if p.x < -60 or p.y < -40 or p.x > vp.x + 60 or p.y > vp.y + 40:
 			continue
 		var covered := false
-		for r in [Rect2(700, 0, 520, 120), Rect2(1560, 0, 360, 175), Rect2(780, 820, 380, 260), Rect2(0, 760, 320, 320), Rect2(1700, 880, 220, 200)]:
+		for r in [Rect2(700, 0, 520, 120), Rect2(1690, 0, 230, 80), Rect2(780, 820, 380, 260), Rect2(0, 760, 320, 320), Rect2(1560, 900, 360, 180)]:
 			if (r as Rect2).has_point(p):
 				covered = true
 		if covered or (_big != null and _big.visible):

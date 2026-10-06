@@ -111,6 +111,9 @@ func _spawn_fleet() -> void:
 	var pool_a: Array = ground["team_a_pool"]
 	var pool_b: Array = ground["team_b_pool"]
 	var player_id: String = pool_a[player_index % pool_a.size()]
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--ship="):
+			player_id = a.substr(7)
 	player = _spawn(player_id, 0, _find_water(ground["spawn_a"]), true)
 
 	for i in OPPONENTS:
@@ -457,7 +460,7 @@ func _physics_process(delta: float) -> void:
 				fwd = a.substr(9)
 		if fwd != "":
 			var d := float(fwd)
-			aim_point = player.global_position + Vector3(sin(player.heading + 0.5), 0, cos(player.heading + 0.5)) * d
+			aim_point = player.global_position + Vector3(sin(player.heading + 0.12), 0, cos(player.heading + 0.12)) * d
 		elif OS.get_cmdline_user_args().has("--autoaim"):
 			_autoaim()
 		elif touch_aiming:
@@ -473,7 +476,7 @@ func _physics_process(delta: float) -> void:
 	_update_camera(delta)
 	_update_hud()
 	var g := gunnery[player] as Gunnery
-	marker.update_for(aim_point, player, g.dispersion_sigma(player.global_position.distance_to(aim_point)), hud.aim_color(), terrain)
+	marker.update_for(aim_point, player, g.dispersion_sigma(player.global_position.distance_to(aim_point)), hud.aim_color(), terrain, g.flight_time(aim_point))
 
 
 ## Test aid (--autoaim): fire at the nearest hostile as a stationary world point, i.e. with no lead.
