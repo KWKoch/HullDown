@@ -17,7 +17,6 @@ const C_WARN := Color(1.00, 0.78, 0.25)
 const C_BAD := Color(1.00, 0.30, 0.28)
 const C_DIM := Color(0.62, 0.68, 0.72)
 const C_TEXT := Color(0.94, 0.96, 0.97)
-const SHOW_DAMAGE_PANEL := true      ## damage-control panel + ship schematic
 const C_PANEL := Color(0.04, 0.06, 0.09, 0.72)
 
 var camera: Camera3D
@@ -44,11 +43,10 @@ var _ui_controls: Array[Control] = []
 var _telegraph: DetentGauge
 var _helm: DetentGauge
 var _fire_button: Button
-var _dc_button: Button
 var _dc_seen := 0
 var _cam_button: Button
 var _compass: Control
-var _schematic: Control
+var _profile: ShipProfile
 var _alert_box: VBoxContainer
 var _log_box: VBoxContainer
 var _log: Array = []                  ## [text, color, age]
@@ -193,20 +191,13 @@ func _build() -> void:
 	_values["prop"] = _gauge_tag(Vector2(960.0 - 170.0, 1080.0 - 12.0 - 190.0 - 34.0), 100.0, "PROP")
 	_values["steer"] = _gauge_tag(Vector2(960.0 - 170.0 + 110.0, 1080.0 - 12.0 - 68.0 - 34.0), 230.0, "STEER")
 
-	# DAMAGE CONTROL (right, blue) with the ship schematic
-	var dmg := _panel("DAMAGE CONTROL", C_DMG, Control.PRESET_TOP_RIGHT, Vector2(-364, 330), 350)
-	_row(dmg, "integrity", "INTEGRITY", C_DMG)
-	_row(dmg, "flooding", "FLOODING", C_DMG)
-	_row(dmg, "list", "LIST", C_DMG)
-	_row(dmg, "fires", "FIRES", C_DMG)
-	_row(dmg, "crew", "REPAIR PARTIES", C_DMG)
-	_row(dmg, "pumps", "PUMPS", C_DMG)
-	_schematic = Control.new()
-	_schematic.custom_minimum_size = Vector2(326, 250)
-	_schematic.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_schematic.draw.connect(_draw_schematic)
-	dmg.add_child(_schematic)
-	dmg.get_parent().visible = SHOW_DAMAGE_PANEL
+	# Own-ship condition: broadside profile, repair-party hats and two lines of figures (top right).
+	_profile = ShipProfile.new()
+	_profile.ship = ship
+	_profile.position = Vector2(1920.0 - 14.0 - ShipProfile.W, 14.0)
+	_profile.clicked.connect(func() -> void: ship.dc.cycle_priority())
+	add_child(_profile)
+	_ui_controls.append(_profile)
 
 	# Compass strip and alerts (top centre)
 	_compass = Control.new()
@@ -342,8 +333,6 @@ func _build_controls() -> void:
 	_fire_button.add_theme_font_size_override("font_size", 20)
 	_fire_button.button_down.connect(func() -> void: fire_changed.emit(true))
 	_fire_button.button_up.connect(func() -> void: fire_changed.emit(false))
-	_dc_button = _btn("DAMAGE CONTROL: AUTO  [V]", Vector2(350, 40), Vector2(1920.0 - 14.0 - 350.0, 806.0), C_DMG)
-	_dc_button.pressed.connect(func() -> void: ship.dc.cycle_priority())
 	_cam_button = _btn("CAMERA: CHASE  [C]", Vector2(190, 50), Vector2(1920.0 - 14.0 - 190.0, 1080.0 - 14.0 - 50.0 - (128.0 if touch else 0.0)), C_NAV)
 	_cam_button.pressed.connect(func() -> void: camera_pressed.emit())
 
@@ -395,10 +384,14 @@ func update_hud(aim_point: Vector3, mode_name: String, enemies: int, nearest: Sh
 	_update_alerts()
 	_update_log()
 	_compass.queue_redraw()
-	_schematic.queue_redraw()
+	_profile.queue_redraw()
 	_reticle.queue_redraw()
 	_plates.queue_redraw()
 	_last_aim = aim_point
+
+
+func aim_color() -> Color:
+	return _aim_color
 
 
 func _water_below_keel() -> float:
@@ -465,12 +458,6 @@ func _update_weapons(aim_point: Vector3, _enemies: int, _nearest: Ship) -> void:
 
 
 func _update_dmg() -> void:
-	var integ := ship.integrity()
-	_put("integrity", "%d%%" % int(integ * 100.0), _status_color(integ))
-	var ratio := ship.total_flooded_t / maxf(ship.reserve_buoyancy_t, 1.0)
-	_put("flooding", "%.0f / %.0f t" % [ship.total_flooded_t, ship.reserve_buoyancy_t], C_GOOD if ratio < 0.15 else (C_WARN if ratio < 0.5 else C_BAD))
-	var ld := absf(rad_to_deg(ship.list_rad))
-	_put("list", "%.1f°" % ld, C_GOOD if ld < 3.0 else (C_WARN if ld < 8.0 else C_BAD))
 	var fires := 0
 	for c in ship.compartments:
 		if c.on_fire and not c.destroyed:
@@ -484,13 +471,8 @@ func _update_dmg() -> void:
 		if flooding and not wasf:
 			_event("Flooding: " + c.id, C_DMG)
 		_flood_state[c.id] = flooding
-	_put("fires", "%d" % fires, C_GOOD if fires == 0 else (C_WARN if fires < 3 else C_BAD))
 	if ship.dc != null:
 		var dc := ship.dc
-		var busy := dc.parties.size() - dc.idle_parties()
-		_put("crew", "%d/%d busy  %d%%" % [busy, dc.parties.size(), int(dc.efficacy() * 100.0)], C_TEXT)
-		_put("pumps", "%.1f t/s" % dc.pumping_now if dc.pumping_now > 0.05 else "idle", C_GOOD if dc.pumping_now > 0.05 else C_DIM)
-		_dc_button.text = "DAMAGE CONTROL: %s  [V]" % dc.priority
 		var fresh := mini(dc.note_count - _dc_seen, dc.log.size())
 		for i in range(dc.log.size() - fresh, dc.log.size()):
 			_event(dc.log[i], C_GOOD)
@@ -604,67 +586,6 @@ func _health_color(c: Compartment) -> Color:
 	return _status_color(c.health_fraction()) * Color(1, 1, 1, 0.9)
 
 
-func _draw_schematic() -> void:
-	var sch := _schematic
-	var size := sch.size
-	var frame := ShipFrame.for_entry(Roster.get_entry(ship.class_id))
-	var sc := minf((size.y - 14.0) / frame.length, (size.x * 0.5 - 10.0) / maxf(frame.beam * 0.5, 1.0))
-	var cx := size.x * 0.5
-	var cy := size.y * 0.5
-	# Screen mapping: bow up; port (+X) on the left.
-	var to_s := func(x: float, z: float) -> Vector2: return Vector2(cx - x * sc, cy - z * sc)
-	# Hull outline.
-	var pts := PackedVector2Array()
-	var steps := 24
-	for i in range(steps + 1):
-		var z := -frame.length * 0.5 + frame.length * float(i) / steps
-		pts.append(to_s.call(frame.half_breadth(z), z))
-	for i in range(steps, -1, -1):
-		var z2 := -frame.length * 0.5 + frame.length * float(i) / steps
-		pts.append(to_s.call(-frame.half_breadth(z2), z2))
-	sch.draw_colored_polygon(pts, Color(0.12, 0.16, 0.22, 0.9))
-	sch.draw_polyline(pts + PackedVector2Array([pts[0]]), C_DMG, 1.5)
-	# Flooded fraction as a blue wash from the keel up inside each compartment, then the part itself.
-	for pass_i in 2:
-		for c in ship.compartments:
-			var is_hull := c.kind == Compartment.Kind.HULL_SECTION
-			if (pass_i == 0) != is_hull:
-				continue
-			var tl: Vector2 = to_s.call(c.center.x + c.half_extents.x, c.center.z + c.half_extents.z)
-			var br: Vector2 = to_s.call(c.center.x - c.half_extents.x, c.center.z - c.half_extents.z)
-			var r := Rect2(tl, br - tl).abs()
-			if is_hull:
-				var hc := _health_color(c)
-				hc.a = 0.45
-				sch.draw_rect(r.grow(-0.5), hc)
-			else:
-				if r.size.x < 3.0:
-					r = r.grow_individual(1.5 - r.size.x * 0.5, 0, 1.5 - r.size.x * 0.5, 0)
-				if r.size.y < 3.0:
-					r = r.grow_individual(0, 1.5 - r.size.y * 0.5, 0, 1.5 - r.size.y * 0.5)
-				sch.draw_rect(r, _health_color(c))
-				if c.kind == Compartment.Kind.MAGAZINE:
-					sch.draw_rect(r, C_WARN, false, 1.5)
-				else:
-					sch.draw_rect(r, Color(0, 0, 0, 0.6), false, 1.0)
-			if c.on_fire and not c.destroyed:
-				var flick := 0.55 + 0.45 * sin(_t * 12.0 + c.center.z)
-				sch.draw_rect(r.grow(2.0), Color(1.0, 0.45, 0.1, flick), false, 2.5)
-			if c.flood_rate > 0.0 and c.flooded_tonnes < c.capacity_tonnes:
-				sch.draw_rect(r.grow(1.0), Color(0.3, 0.55, 1.0, 0.9), false, 2.0)
-	var font := ThemeDB.fallback_font
-	sch.draw_string(font, Vector2(4, 14), "BOW", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, C_DIM)
-	# Legend.
-	var lx := 6.0
-	var ly := size.y - 62.0
-	for k in 3:
-		var lc: Color = [C_GOOD, C_WARN, C_BAD][k]
-		sch.draw_rect(Rect2(lx, ly + k * 14.0, 10, 10), lc)
-		sch.draw_string(font, Vector2(lx + 15, ly + 9 + k * 14.0), ["sound", "damaged", "critical"][k], HORIZONTAL_ALIGNMENT_LEFT, -1, 11, C_DIM)
-	sch.draw_rect(Rect2(lx, ly + 42, 10, 10), C_WARN, false, 1.5)
-	sch.draw_string(font, Vector2(lx + 15, ly + 51), "magazine", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, C_DIM)
-
-
 func _draw_reticle() -> void:
 	if camera == null or ship == null or ship.sunk or camera.is_position_behind(_last_aim):
 		return
@@ -674,19 +595,39 @@ func _draw_reticle() -> void:
 		return
 	var c := _aim_color
 	var r := 18.0
-	_reticle.draw_arc(p, r, 0.0, TAU, 40, Color(0, 0, 0, 0.6), 4.0)
-	_reticle.draw_arc(p, r, 0.0, TAU, 40, c, 2.0)
-	for a in [0.0, PI * 0.5, PI, PI * 1.5]:
-		var d := Vector2(cos(a), sin(a))
-		_reticle.draw_line(p + d * (r + 3.0), p + d * (r + 11.0), Color(0, 0, 0, 0.6), 4.0)
-		_reticle.draw_line(p + d * (r + 3.0), p + d * (r + 11.0), c, 2.0)
-	_reticle.draw_circle(p, 2.0, c)
+	_draw_splash_ellipse(p, c)
 	var font := ThemeDB.fallback_font
 	_draw_battery_lamps(p, r)
 	var ts := font.get_string_size(_aim_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14)
 	var tp := p + Vector2(-ts.x * 0.5, r + 28.0)
 	_reticle.draw_string(font, tp + Vector2(1, 1), _aim_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0, 0, 0, 0.9))
 	_reticle.draw_string(font, tp, _aim_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, c)
+
+
+## The scatter ellipse seen from the camera: the same shape the AimMarker lays on the water, projected
+## to the screen with a fixed line weight so it stays legible when the view is nearly edge-on.
+func _draw_splash_ellipse(p: Vector2, c: Color) -> void:
+	var sh := ship.global_position
+	var flat := Vector2(_last_aim.x - sh.x, _last_aim.z - sh.z)
+	var along := flat.normalized() if flat.length() > 1.0 else Vector2(sin(ship.heading), cos(ship.heading))
+	var across := Vector2(-along.y, along.x)
+	var sg := gunnery.dispersion_sigma(flat.length())
+	var a := maxf(sg.x * 2.0, 9.0)
+	var b := maxf(sg.y * 2.0, 6.0)
+	var pts := PackedVector2Array()
+	for i in 41:
+		var th := TAU * float(i) / 40.0
+		var w := Vector2(_last_aim.x, _last_aim.z) + along * (a * cos(th)) + across * (b * sin(th))
+		var wp := Vector3(w.x, _last_aim.y, w.y)
+		if camera.is_position_behind(wp):
+			return
+		pts.append(camera.unproject_position(wp))
+	_reticle.draw_polyline(pts, Color(0, 0, 0, 0.55), 4.0, true)
+	_reticle.draw_polyline(pts, c, 2.0, true)
+	# Crosshair arms of fixed pixel length through the centre, with a gap.
+	for d in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
+		_reticle.draw_line(p + d * 5.0, p + d * 15.0, Color(0, 0, 0, 0.55), 4.0)
+		_reticle.draw_line(p + d * 5.0, p + d * 15.0, c, 2.0)
 
 
 ## A lamp per turret above the reticle, bow to stern: loaded and clear to fire (green), reloading
@@ -754,7 +695,7 @@ func _draw_plates() -> void:
 		if p.x < -60 or p.y < -40 or p.x > vp.x + 60 or p.y > vp.y + 40:
 			continue
 		var covered := false
-		for r in [Rect2(700, 0, 520, 120), Rect2(1510, 320, 410, 540), Rect2(780, 820, 380, 260), Rect2(0, 760, 320, 320), Rect2(1700, 880, 220, 200)]:
+		for r in [Rect2(700, 0, 520, 120), Rect2(1560, 0, 360, 175), Rect2(780, 820, 380, 260), Rect2(0, 760, 320, 320), Rect2(1700, 880, 220, 200)]:
 			if (r as Rect2).has_point(p):
 				covered = true
 		if covered or (_big != null and _big.visible):

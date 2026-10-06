@@ -29,6 +29,7 @@ var look_up := 0.0           ## test option: raise the look-at point to inspect 
 var hud: Hud
 var controls: PlayerControls
 var track: TrackProjection
+var marker: AimMarker
 var sensors: SensorNet
 var tod_final := 12.0
 var peace := true           ## UI-testing mode: AI ships neither move nor fire. Use --hot for a live battle.
@@ -135,6 +136,8 @@ func _spawn_fleet() -> void:
 		cam_dist = maxf(70.0, player.wlen() * 1.15)
 	track = TrackProjection.new()
 	add_child(track)
+	marker = AimMarker.new()
+	add_child(marker)
 	sensors = SensorNet.new()
 	add_child(sensors)
 	sensors.setup(terrain, player.team, float(ground["visibility_m"]), tod_final < 5.5 or tod_final > 19.5)
@@ -448,7 +451,14 @@ func _physics_process(delta: float) -> void:
 		_wounded = true
 		_wound()
 	if not player.sunk:
-		if OS.get_cmdline_user_args().has("--autoaim"):
+		var fwd := ""
+		for a in OS.get_cmdline_user_args():
+			if a.begins_with("--aimfwd="):
+				fwd = a.substr(9)
+		if fwd != "":
+			var d := float(fwd)
+			aim_point = player.global_position + Vector3(sin(player.heading + 0.5), 0, cos(player.heading + 0.5)) * d
+		elif OS.get_cmdline_user_args().has("--autoaim"):
 			_autoaim()
 		elif touch_aiming:
 			aim_point = touch_aim_world
@@ -462,6 +472,8 @@ func _physics_process(delta: float) -> void:
 	track.update_for(player, float(EngineTelegraph.HELM_ORDERS[controls.helm_ordered][1]), float(EngineTelegraph.ENGINE_ORDERS[controls.engine_ordered][1]))
 	_update_camera(delta)
 	_update_hud()
+	var g := gunnery[player] as Gunnery
+	marker.update_for(aim_point, player, g.dispersion_sigma(player.global_position.distance_to(aim_point)), hud.aim_color(), terrain)
 
 
 ## Test aid (--autoaim): fire at the nearest hostile as a stationary world point, i.e. with no lead.

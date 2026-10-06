@@ -179,6 +179,22 @@ func _lead(muzzle: Vector3, target: Vector3, tvel: Vector3) -> Vector3:
 	return Vector3(sin(bearing) * cos(elev), sin(elev), cos(bearing) * cos(elev))
 
 
+## 1-sigma landing scatter (range, deflection) in metres at a given range, for the aiming marker.
+## Empirical from tests/test_ballistics.gd (about 0.7% / 0.35% of range) scaled by the same ship-motion
+## and damage factors the shells use.
+func dispersion_sigma(range_m: float) -> Vector2:
+	var sf := clampf(absf(ship.speed_ms) / maxf(ship.max_speed_ms, 1.0), 0.0, 1.0)
+	var motion := 1.0 + 0.6 * sf + 0.8 * absf(ship.rudder) * sf
+	var live := 0.0
+	var n := 0.0
+	for t in reload_left:
+		n += 1.0
+		live += (t as Compartment).health_fraction() if (t as Compartment).is_functional() else 0.0
+	var wear := 1.0 + (1.0 - (live / maxf(n, 1.0))) + 3.0 * absf(ship.list_rad)
+	var k := motion * wear
+	return Vector2(range_m * 0.0069, range_m * 0.0036) * k
+
+
 ## Seconds a shell takes to reach a world point from this ship's guns (-1 if out of range).
 func flight_time(target: Vector3) -> float:
 	if gun.is_empty():
