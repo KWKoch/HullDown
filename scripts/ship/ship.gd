@@ -584,6 +584,8 @@ func _resolve_collision(o: Ship, fa: Array, fb: Array, n: Vector2, depth: float)
 			# The lighter ship crumples more: it takes the larger share of the crushed energy.
 			_crush(pa, lost * mb / (ma + mb))
 			o._crush(pb, lost * ma / (ma + mb))
+			_hull_strain(closing, lost * mb / (ma + mb), ma)
+			o._hull_strain(closing, lost * ma / (ma + mb), mb)
 	# Never overlap: push apart in inverse proportion to mass.
 	var push := n * (depth + 0.05)
 	var wa := mb / (ma + mb)
@@ -607,6 +609,19 @@ func _apply_collision_impulse(new_v: Vector2, impulse: Vector2, r: Vector2, mass
 	var inertia := mass_kg * (wlen() * wlen() + wbeam() * wbeam()) / 12.0
 	var torque := r.y * impulse.x - r.x * impulse.y
 	heading += clampf(torque / inertia, -0.15, 0.15) * 0.5
+
+
+## A collision shakes the whole hull: every fitting takes a share of strain damage, so overall
+## integrity drops even where nothing was struck directly (never enough alone to destroy a space).
+func _hull_strain(closing: float, share_j: float, mass_kg: float) -> void:
+	var strain := clampf(0.012 * closing + 0.9 * share_j / (0.5 * mass_kg * 400.0), 0.0, 0.5)
+	for c in compartments:
+		if c.destroyed:
+			continue
+		var d := minf(c.max_hp * strain * randf_range(0.6, 1.2), c.hp - c.max_hp * 0.05)
+		if d > 0.0:
+			c.apply_damage(d)
+			_post_damage(c)
 
 
 func _crush(world_contact: Vector2, joules: float) -> void:
