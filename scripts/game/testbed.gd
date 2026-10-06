@@ -28,6 +28,7 @@ var _yaw_forced := false
 var look_up := 0.0           ## test option: raise the look-at point to inspect the sky
 var hud: Hud
 var controls: PlayerControls
+var track: TrackProjection
 var peace := true           ## UI-testing mode: AI ships neither move nor fire. Use --hot for a live battle.
 var fire_held := false
 var touch_aim_world := Vector3.ZERO
@@ -115,9 +116,22 @@ func _spawn_fleet() -> void:
 		var s := _spawn(cls, 1, _find_water(anchor + offset), false)
 		s.heading = PI
 	player.heading = 0.0
+	if peace:
+		# Two practice targets close ahead: real ships with their magazines emptied and guns disarmed.
+		for k in 2:
+			var cls_t: String = pool_b[(k * 2) % pool_b.size()]
+			var side := -1.0 if k == 0 else 1.0
+			var tpos := _find_water(player.global_position + Vector3(side * 650.0, 0, 1900.0 + k * 900.0), 300.0)
+			var tgt := _spawn(cls_t, 1, tpos, false)
+			tgt.heading = PI * 0.5 * side
+			tgt.disarmed = true
+			for c in tgt.compartments:
+				c.ammo_stored = 0.0
 	cam_heading = 0.0
 	if not _dist_forced:
 		cam_dist = maxf(70.0, player.length_m * 1.15)
+	track = TrackProjection.new()
+	add_child(track)
 	controls = PlayerControls.new()
 	add_child(controls)
 	controls.setup(player)
@@ -412,10 +426,12 @@ func _physics_process(delta: float) -> void:
 			aim_point = touch_aim_world
 		else:
 			_update_aim_point(get_viewport().get_mouse_position())
+		(gunnery[player] as Gunnery).aim_at(aim_point)      # the turrets always swing toward the aim point
 		if fire_held:
 			(gunnery[player] as Gunnery).fire_at(aim_point, Vector3.ZERO)
 	else:
 		fire_held = false
+	track.update_for(player)
 	_update_camera(delta)
 	_update_hud()
 
@@ -470,7 +486,12 @@ func _designate_aim(screen_pos: Vector2) -> void:
 func _build_hud() -> void:
 	hud = Hud.new()
 	add_child(hud)
-	hud.setup(player, gunnery[player], controls, terrain, String(Battlegrounds.get_ground(ground_id)["name"]), OPPONENTS)
+	hud.camera = cam
+	var foes := 0
+	for n in get_tree().get_nodes_in_group("ships"):
+		if (n as Ship).team != player.team:
+			foes += 1
+	hud.setup(player, gunnery[player], controls, terrain, String(Battlegrounds.get_ground(ground_id)["name"]), foes)
 	hud.camera_pressed.connect(_cycle_camera)
 	hud.fire_changed.connect(func(held: bool) -> void: fire_held = held)
 

@@ -15,6 +15,7 @@ var display_name: String
 var nation: String
 var team: int = 0
 var is_player: bool = false
+var disarmed: bool = false           ## true: cannot fire (ammunition emptied)
 
 var compartments: Array[Compartment] = []
 var length_m: float = 150.0

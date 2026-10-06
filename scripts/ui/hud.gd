@@ -20,6 +20,11 @@ const C_TEXT := Color(0.94, 0.96, 0.97)
 const SHOW_DAMAGE_PANEL := true      ## damage-control panel + ship schematic
 const C_PANEL := Color(0.04, 0.06, 0.09, 0.72)
 
+var camera: Camera3D
+var _reticle: Control
+var _aim_text := ""
+var _aim_color := Color.WHITE
+var _aim_screen_ok := false
 var ship: Ship
 var gunnery: Gunnery
 var controls: PlayerControls
@@ -44,6 +49,7 @@ var _turret_bars: Array[ProgressBar] = []
 var _fire_state: Dictionary = {}      ## compartment id -> bool, for edge-detecting events
 var _flood_state: Dictionary = {}
 var _t := 0.0
+var _last_aim := Vector3.ZERO
 
 
 func setup(p_ship: Ship, p_gun: Gunnery, p_controls: PlayerControls, p_terrain: Node, p_ground: String, p_opponents: int) -> void:
@@ -123,6 +129,11 @@ func _row(box: VBoxContainer, key: String, caption: String, accent: Color) -> vo
 
 
 func _build() -> void:
+	_reticle = Control.new()
+	_reticle.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_reticle.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_reticle.draw.connect(_draw_reticle)
+	add_child(_reticle)
 	# NAVIGATION (top-left, teal)
 	var nav := _panel("NAVIGATION", C_NAV, Control.PRESET_TOP_LEFT, Vector2(14, 14), 330)
 	var name_l := _label("", 17, C_TEXT)
@@ -150,6 +161,7 @@ func _build() -> void:
 	_row(wep, "hostiles", "HOSTILES", C_WEP)
 	_row(wep, "nearest", "NEAREST", C_WEP)
 	_row(wep, "aim", "AIM RANGE", C_WEP)
+	_row(wep, "bearing", "BATTERY", C_WEP)
 
 	# DAMAGE CONTROL (right, blue) with the ship schematic
 	var dmg := _panel("DAMAGE CONTROL", C_DMG, Control.PRESET_TOP_RIGHT, Vector2(-364, 330), 350)
@@ -224,24 +236,24 @@ func _build_controls() -> void:
 	var el: Array[String] = []
 	var ec: Array[Color] = []
 	for o in EngineTelegraph.ENGINE_ORDERS:
-		el.append(String(o[0]))
+		el.append(String(o[0]).replace("AHEAD ", "").replace("ASTERN ", "").replace("ALL ASTERN", "ALL"))
 		ec.append(C_GOOD if float(o[1]) > 0.0 else (C_DIM if float(o[1]) == 0.0 else C_BAD))
 	_telegraph = DetentGauge.new()
-	_telegraph.size = Vector2(150, 226)
-	_telegraph.position = Vector2(960.0 - 214.0, 1080.0 - 12.0 - 226.0)
+	_telegraph.size = Vector2(100, 190)
+	_telegraph.position = Vector2(960.0 - 170.0, 1080.0 - 12.0 - 190.0)
 	add_child(_telegraph)
-	_telegraph.setup("ENGINE ORDER  W/S", true, el, ec, controls.engine_ordered)
+	_telegraph.setup("ENGINE  W/S", true, el, ec, controls.engine_ordered)
 	_telegraph.picked.connect(func(i: int) -> void: controls.ring_engine(i))
 	_ui_controls.append(_telegraph)
-	var hl: Array[String] = ["HARD P", "P 20", "P 10", "MID", "S 10", "S 20", "HARD S"]
+	var hl: Array[String] = ["HARD", "20", "10", "MID", "10", "20", "HARD"]
 	var hc: Array[Color] = []
 	for o in EngineTelegraph.HELM_ORDERS:
 		hc.append(C_BAD if float(o[1]) > 0.0 else (C_DIM if float(o[1]) == 0.0 else C_GOOD))
 	_helm = DetentGauge.new()
-	_helm.size = Vector2(290, 96)
-	_helm.position = Vector2(960.0 - 214.0 + 150.0 + 12.0, 1080.0 - 12.0 - 96.0)
+	_helm.size = Vector2(230, 68)
+	_helm.position = Vector2(960.0 - 170.0 + 100.0 + 10.0, 1080.0 - 12.0 - 68.0)
 	add_child(_helm)
-	_helm.setup("HELM  A/D   X centres", false, hl, hc, controls.helm_ordered)
+	_helm.setup("HELM  A/D  X", false, hl, hc, controls.helm_ordered)
 	_helm.picked.connect(func(i: int) -> void: controls.set_helm(i))
 	_ui_controls.append(_helm)
 	# Fire and camera on the lower right.
@@ -299,6 +311,8 @@ func update_hud(aim_point: Vector3, mode_name: String, enemies: int, nearest: Sh
 	_update_log()
 	_compass.queue_redraw()
 	_schematic.queue_redraw()
+	_reticle.queue_redraw()
+	_last_aim = aim_point
 
 
 func _water_below_keel() -> float:
@@ -361,7 +375,7 @@ func _update_weapons(aim_point: Vector3, enemies: int, nearest: Ship) -> void:
 			continue
 		var t2: Compartment = turrets[i]
 		var left: float = float(gunnery.reload_left.get(t2, 0.0))
-		var full := 60.0 / maxf(0.1, float(gunnery.gun.get("rpm", 2.0)))
+		var full := gunnery.reload_seconds()
 		bar2.max_value = 1.0
 		var fill := 1.0 - clampf(left / maxf(full, 0.1), 0.0, 1.0)
 		bar2.value = fill
@@ -385,6 +399,28 @@ func _update_weapons(aim_point: Vector3, enemies: int, nearest: Ship) -> void:
 	var aim_d := ship.global_position.distance_to(aim_point)
 	var max_r := gunnery.max_range()
 	_put("aim", "%d yd%s" % [int(aim_d * 1.0936), "  OUT OF RANGE" if aim_d > max_r else ""], C_BAD if aim_d > max_r else C_GOOD)
+	var bs := gunnery.battery_status(aim_point)
+	var btxt := ""
+	var bcol := C_GOOD
+	if int(bs["total"]) == 0:
+		btxt = "NO GUNS"
+		bcol = C_BAD
+	elif aim_d > max_r:
+		btxt = "OUT OF RANGE"
+		bcol = C_BAD
+	elif int(bs["in_arc"]) == 0:
+		btxt = "DEAD ZONE"
+		bcol = C_BAD
+	elif int(bs["aligned"]) == int(bs["total"]):
+		btxt = "ON TARGET %d/%d" % [bs["aligned"], bs["total"]]
+	else:
+		btxt = "TRAINING %d/%d" % [bs["aligned"], bs["total"]]
+		bcol = C_WARN
+		if int(bs["in_arc"]) < int(bs["total"]):
+			btxt += "  (%d in arc)" % bs["in_arc"]
+	_put("bearing", btxt, bcol)
+	_aim_text = "%d yd  %s" % [int(aim_d * 1.0936), btxt]
+	_aim_color = bcol
 
 
 func _update_dmg() -> void:
@@ -576,3 +612,26 @@ func _draw_schematic() -> void:
 		sch.draw_string(font, Vector2(lx + 15, ly + 9 + k * 14.0), ["sound", "damaged", "critical"][k], HORIZONTAL_ALIGNMENT_LEFT, -1, 11, C_DIM)
 	sch.draw_rect(Rect2(lx, ly + 42, 10, 10), C_WARN, false, 1.5)
 	sch.draw_string(font, Vector2(lx + 15, ly + 51), "magazine", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, C_DIM)
+
+
+func _draw_reticle() -> void:
+	if camera == null or ship == null or ship.sunk or camera.is_position_behind(_last_aim):
+		return
+	var p := camera.unproject_position(_last_aim)
+	var vp := _reticle.get_viewport_rect().size
+	if p.x < 0 or p.y < 0 or p.x > vp.x or p.y > vp.y:
+		return
+	var c := _aim_color
+	var r := 18.0
+	_reticle.draw_arc(p, r, 0.0, TAU, 40, Color(0, 0, 0, 0.6), 4.0)
+	_reticle.draw_arc(p, r, 0.0, TAU, 40, c, 2.0)
+	for a in [0.0, PI * 0.5, PI, PI * 1.5]:
+		var d := Vector2(cos(a), sin(a))
+		_reticle.draw_line(p + d * (r + 3.0), p + d * (r + 11.0), Color(0, 0, 0, 0.6), 4.0)
+		_reticle.draw_line(p + d * (r + 3.0), p + d * (r + 11.0), c, 2.0)
+	_reticle.draw_circle(p, 2.0, c)
+	var font := ThemeDB.fallback_font
+	var ts := font.get_string_size(_aim_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14)
+	var tp := p + Vector2(-ts.x * 0.5, r + 28.0)
+	_reticle.draw_string(font, tp + Vector2(1, 1), _aim_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0, 0, 0, 0.9))
+	_reticle.draw_string(font, tp, _aim_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, c)

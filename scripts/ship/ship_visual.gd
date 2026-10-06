@@ -104,9 +104,12 @@ func _plume(c: Compartment, mi: MeshInstance3D, on: bool) -> void:
 
 func _process(delta: float) -> void:
 	_t += delta
+	var gun_node: Object = ship.get_meta("gunnery", null)
 	for c in parts:
 		var mi: MeshInstance3D = parts[c]
 		var mat: StandardMaterial3D = _mats[c]
+		if c.kind == Compartment.Kind.TURRET and gun_node != null and not c.destroyed:
+			mi.rotation.y = (0.0 if c.center.z >= 0.0 else PI) + float(gun_node.train.get(c, 0.0))
 		_plume(c, mi, (c.on_fire or (c.destroyed and c.kind != Compartment.Kind.HULL_SECTION)) and not ship.sunk)
 		if c.kind in STRUCT:
 			mi.visible = c.destroyed or c.health_fraction() < 0.55

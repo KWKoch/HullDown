@@ -5,9 +5,17 @@ extends Node
 ## integrating the same ballistics Shell uses, so aiming accounts for drag and gravity.
 
 static var ceasefire := false     ## when true, only the player's ship may fire (UI testing)
+const RELOAD_SCALE := 0.5            ## reload time multiplier (0.5 = guns reload twice as fast)
+const ARC_HALF := 2.6179938          ## 150 deg either side of the turret's centre line: a 60 deg dead zone
+const ALIGN_TOL := 0.0436            ## 2.5 deg: a turret fires only when trained this close to the solution
+
 var ship: Ship
 var gun: Dictionary
 var reload_left := {}        ## Compartment -> seconds until ready
+var train := {}              ## Compartment -> training angle relative to the turret's centre line (rad)
+var traverse_rate := 0.12    ## rad/s the turrets can swing
+var _track_pos := Vector3.ZERO
+var _track_t := 0.0
 var dispersion_deg := 0.35   ## 1-sigma angular scatter at full health
 
 
@@ -17,25 +25,85 @@ func setup(p_ship: Ship) -> void:
 	gun = entry.get("main_gun", {})
 	for t in ship.gun_turrets():
 		reload_left[t] = randf() * 3.0
+		train[t] = 0.0
+	var cal := float(gun.get("caliber_mm", 150.0))
+	traverse_rate = deg_to_rad(clampf(2500.0 / maxf(cal, 20.0), 4.0, 30.0))
+	ship.set_meta("gunnery", self)
 
 
 func max_range() -> float:
 	return float(gun.get("range_m", 0.0))
 
 
+func reload_seconds() -> float:
+	return 60.0 / maxf(float(gun.get("rpm", 2.0)), 0.1) * RELOAD_SCALE
+
+
+## Angle (world heading frame) of the centre line of a turret's firing arc, relative to the bow.
+func arc_center(t: Compartment) -> float:
+	return 0.0 if t.center.z >= 0.0 else PI
+
+
+## Where a turret needs to point for a world target: the arc-relative training angle (clamped
+## to the arc, because a turret cannot swing through its dead zone) and whether it is in arc.
+func _solution(t: Compartment, target: Vector3) -> Dictionary:
+	var d := target - ship.to_global(t.center)
+	var rel := wrapf(atan2(d.x, d.z) - ship.heading, -PI, PI)
+	var a := wrapf(rel - arc_center(t), -PI, PI)
+	return {"a": clampf(a, -ARC_HALF, ARC_HALF), "in_arc": absf(a) <= ARC_HALF}
+
+
+## Swing the turrets toward a world point (call every frame while aiming).
+func aim_at(target_pos: Vector3) -> void:
+	_track_pos = target_pos
+	_track_t = 0.4
+
+
+## How many working turrets can bear on a point (in arc) and are already trained on it.
+func battery_status(target: Vector3) -> Dictionary:
+	var total := 0
+	var in_arc := 0
+	var aligned := 0
+	for t in train:
+		var turret: Compartment = t
+		if not turret.is_functional():
+			continue
+		total += 1
+		var sol := _solution(turret, target)
+		if sol["in_arc"]:
+			in_arc += 1
+			if absf(float(train[t]) - float(sol["a"])) <= ALIGN_TOL:
+				aligned += 1
+	return {"total": total, "in_arc": in_arc, "aligned": aligned}
+
+
 func _physics_process(delta: float) -> void:
 	for t in reload_left:
 		reload_left[t] = maxf(0.0, reload_left[t] - delta)
+	if _track_t > 0.0 and not ship.sunk:
+		_track_t -= delta
+		for t in train:
+			var turret: Compartment = t
+			if not turret.is_functional():
+				continue
+			var sol := _solution(turret, _track_pos)
+			var rate := traverse_rate * (0.4 + 0.6 * turret.health_fraction())
+			train[t] = move_toward(float(train[t]), float(sol["a"]), rate * delta)
 
 
 ## Fires every ready turret at `target_pos` (world). `target_vel` leads a moving target.
 func fire_at(target_pos: Vector3, target_vel: Vector3) -> int:
-	if gun.is_empty() or ship.sunk or (ceasefire and not ship.is_player):
+	if gun.is_empty() or ship.sunk or ship.disarmed or (ceasefire and not ship.is_player):
 		return 0
+	aim_at(target_pos)
 	var fired := 0
 	for t in reload_left:
 		var turret: Compartment = t
 		if not turret.is_functional() or reload_left[t] > 0.0:
+			continue
+		# Respect the dead zone and the swing: the turret must be in arc and trained on target.
+		var sol := _solution(turret, target_pos)
+		if not sol["in_arc"] or absf(float(train[t]) - float(sol["a"])) > ALIGN_TOL:
 			continue
 		var muzzle := ship.to_global(turret.center + Vector3(0, 2.0, 0))
 		var aim := _lead(muzzle, target_pos, target_vel)
@@ -46,7 +114,7 @@ func fire_at(target_pos: Vector3, target_vel: Vector3) -> int:
 			_spawn_shell(muzzle, aim, turret)
 		Fx.muzzle(ship, muzzle, aim, float(gun.get("caliber_mm", 100.0)))
 		# A damaged turret reloads slower; rpm is per barrel salvo.
-		var base := 60.0 / float(gun.get("rpm", 2.0))
+		var base := reload_seconds()
 		reload_left[t] = base * (1.0 + (1.0 - turret.health_fraction()) * 1.5)
 		fired += 1
 	return fired

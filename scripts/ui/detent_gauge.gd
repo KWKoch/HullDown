@@ -47,8 +47,8 @@ func _n() -> int:
 func _track() -> Array[float]:
 	## [start, end] coordinates of the first and last detent along the long axis.
 	if vertical:
-		return [30.0, size.y - 16.0]
-	return [34.0, size.x - 34.0]
+		return [28.0, size.y - 12.0]
+	return [26.0, size.x - 26.0]
 
 
 func _coord(idx: float) -> float:
@@ -89,7 +89,7 @@ func _draw() -> void:
 	draw_string(font, Vector2(10, 17), title, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, BRASS_LIGHT)
 	var n := _n()
 	if vertical:
-		var tx := size.x - 34.0
+		var tx := size.x - 26.0
 		# Slot the lever rides in.
 		draw_rect(Rect2(tx - 3, _coord(0), 6, _coord(n - 1) - _coord(0)), Color(0.0, 0.0, 0.0, 0.7))
 		draw_rect(Rect2(tx - 1, _coord(0), 2, _coord(n - 1) - _coord(0)), BRASS)
@@ -113,7 +113,7 @@ func _draw() -> void:
 			Vector2(tx + 6, ly + 9), Vector2(tx - 8, ly + 9), Vector2(tx - 20, ly)]), BRASS_LIGHT, 1.5)
 		draw_line(Vector2(tx - 5, ly), Vector2(tx + 4, ly), Color(0.2, 0.14, 0.05), 2.0)
 	else:
-		var ty := 50.0
+		var ty := 34.0
 		draw_rect(Rect2(_coord(0), ty - 3, _coord(n - 1) - _coord(0), 6), Color(0.0, 0.0, 0.0, 0.7))
 		draw_rect(Rect2(_coord(0), ty - 1, _coord(n - 1) - _coord(0), 2), BRASS)
 		for i in n:
@@ -123,7 +123,7 @@ func _draw() -> void:
 			draw_line(Vector2(x, ty + 5), Vector2(x, ty + 13), c, 2.0)
 			var col := c.lightened(0.35) if on else c.darkened(0.15)
 			var ts := font.get_string_size(labels[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 10)
-			draw_string(font, Vector2(x - ts.x * 0.5, ty + 26), labels[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, col)
+			draw_string(font, Vector2(x - ts.x * 0.5, ty + 25), labels[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, col)
 		# Actual rudder pointer above the slot.
 		var rx := _coord(reply)
 		var rc2 := Color(0.45, 0.88, 0.5) if reply_matches else Color(1.0, 0.78, 0.25)
