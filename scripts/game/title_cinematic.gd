@@ -8,6 +8,15 @@ extends Node3D
 
 const NEXT_SCENE := "res://scenes/testbed.tscn"
 
+## Captions. Speed: ~20 characters/second typed, then held long enough to read twice over.
+const TYPE_SECONDS_PER_CHAR := 0.05
+const HOLD_BASE := 1.8
+const HOLD_PER_CHAR := 0.045
+
+const CONTACT_BEARING := 323.0
+const CONTACT_RANGE_YDS := 2000
+const CONTACT_DISTANCE_M := 9000.0    ## where the model actually sits (flat world: hull-down is faked by sinking it)
+
 var cam: Camera3D
 var contact: Node3D
 var caption: Label
@@ -24,8 +33,8 @@ class ScopeOverlay extends Control:
 	## Black surround with a circular eyepiece opening, plus reticle and readout. Drawn directly
 	## (no shader) so it behaves the same on every renderer.
 	var strength := 0.0          ## 0 = hidden, 1 = fully in the scope
-	var bearing := 45.0
-	var range_m := 21500.0
+	var bearing := 323.0
+	var range_yds := 2000
 	var overlay_font: Font
 
 	func _ready() -> void:
@@ -56,8 +65,8 @@ class ScopeOverlay extends Control:
 			var h := 7.0 if k % 2 == 0 else 3.5
 			draw_line(Vector2(x, c.y - h), Vector2(x, c.y + h), col, 1.2)
 		draw_arc(c, r, 0.0, TAU, 128, col, 3.0, true)
-		var txt := "BRG %03d   RNG %05d   SCOPE 6X" % [int(bearing), int(range_m)]
-		draw_string(overlay_font, Vector2(c.x - r * 0.6, c.y + r - 24), txt,
+		var txt := "BRG %03d   RNG %04d YDS   SCOPE 6X" % [int(bearing), range_yds]
+		draw_string(overlay_font, Vector2(c.x - r * 0.6, c.y + r - 78), txt,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.92, 0.9, 0.78, strength))
 
 
@@ -89,26 +98,24 @@ func _build_sea_and_sky() -> void:
 func _build_contact() -> void:
 	contact = Node3D.new()
 	add_child(contact)
-	contact.position = Vector3(9500, -12.5, 9500)  # ~13.4 km, bearing 045; hull sunk below the sea plane
-	contact.rotation.y = deg_to_rad(-60.0)
+	var brg := deg_to_rad(CONTACT_BEARING)
+	# Hull sunk below the sea plane so only the mast and the top of the bridge and funnel clear the horizon.
+	contact.position = Vector3(sin(brg) * CONTACT_DISTANCE_M, -9.0, cos(brg) * CONTACT_DISTANCE_M)
+	contact.rotation.y = brg + deg_to_rad(90.0 + 18.0)     # near-broadside to the observer
 	var dark := StandardMaterial3D.new()
 	dark.albedo_color = Color(0.14, 0.14, 0.16)
-	# Hull (submerged by the offset above).
-	_box(contact, Vector3(30, 12, 220), Vector3(0, 6, 0), dark)
-	# Superstructure and tripod-style mast.
-	_box(contact, Vector3(14, 10, 24), Vector3(0, 17, 25), dark)
-	_box(contact, Vector3(9, 8, 14), Vector3(0, 26, 25), dark)
-	_box(contact, Vector3(2.5, 28, 2.5), Vector3(0, 40, 25), dark)
-	_box(contact, Vector3(8, 1.2, 1.2), Vector3(0, 48, 25), dark)         # yardarm
-	_box(contact, Vector3(7, 14, 10), Vector3(0, 22, -8), dark)           # forward funnel
-	_box(contact, Vector3(7, 12, 9), Vector3(0, 21, -30), dark)           # after funnel
-	_box(contact, Vector3(10, 5, 14), Vector3(0, 17, 70), dark)           # turret
-	_box(contact, Vector3(10, 5, 14), Vector3(0, 17, -85), dark)
-	# Smoke smudge.
+	_box(contact, Vector3(11, 8, 95), Vector3(0, 4, 0), dark)             # hull (below the horizon)
+	_box(contact, Vector3(4.5, 2.5, 5), Vector3(0, 9.3, 28), dark)        # forward gun mount
+	_box(contact, Vector3(4.5, 2.5, 5), Vector3(0, 9.3, -30), dark)       # after gun mount
+	_box(contact, Vector3(8, 6, 12), Vector3(0, 11.0, 12), dark)          # bridge
+	_box(contact, Vector3(4.5, 7, 5), Vector3(0, 13.5, -6), dark)         # single funnel
+	_box(contact, Vector3(2.4, 24, 2.4), Vector3(0, 23.0, 10), dark)      # the single mast
+	_box(contact, Vector3(9.0, 1.2, 1.2), Vector3(0, 29.0, 10), dark)     # yardarm
+	_box(contact, Vector3(3.5, 1.4, 2.5), Vector3(0, 35.5, 10), dark)     # top mark / radar
 	var smoke := StandardMaterial3D.new()
-	smoke.albedo_color = Color(0.25, 0.23, 0.22, 0.5)
+	smoke.albedo_color = Color(0.25, 0.23, 0.22, 0.45)
 	smoke.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_box(contact, Vector3(6, 6, 90), Vector3(-3, 38, -40), smoke)
+	_box(contact, Vector3(4, 4, 55), Vector3(-2, 21, -32), smoke)           # thin funnel smoke
 
 
 func _build_bridge_wing() -> void:
@@ -167,6 +174,7 @@ func _build_ui() -> void:
 	caption.offset_top = -110
 	caption.offset_bottom = -40
 	caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	caption.add_theme_font_size_override("font_size", 26)
 	caption.add_theme_color_override("font_color", Color(0.96, 0.94, 0.86))
 	caption.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.9))
@@ -204,16 +212,16 @@ func _build_ui() -> void:
 
 # --- Sequence --------------------------------------------------------------------
 
-func _say(text: String, seconds: float) -> void:
-	## Typewriter caption. Swap in an AudioStreamPlayer here when VO is recorded.
+func _say(speaker: String, text: String) -> void:
+	## Typewriter caption: "SPEAKER: line". Swap in an AudioStreamPlayer here when VO is recorded.
+	var full := "%s: %s" % [speaker.to_upper(), text]
 	caption.text = ""
-	var n := text.length()
-	for i in n:
+	for i in full.length():
 		if _skipped:
 			return
-		caption.text = text.substr(0, i + 1)
-		await get_tree().create_timer(minf(0.035, seconds * 0.5 / maxf(n, 1))).timeout
-	await get_tree().create_timer(seconds).timeout
+		caption.text = full.substr(0, i + 1)
+		await get_tree().create_timer(TYPE_SECONDS_PER_CHAR).timeout
+	await get_tree().create_timer(HOLD_BASE + HOLD_PER_CHAR * full.length()).timeout
 
 
 func _run_sequence() -> void:
@@ -226,26 +234,28 @@ func _run_sequence() -> void:
 	var tw := create_tween()
 	tw.tween_property(fade, "color:a", 0.0, 3.0)
 	await _wait(2.4)
-	await _say("LOOKOUT: Bridge, lookout. Contact, bearing zero-four-five. Masts only -- hull down.", 2.4)
-	await _wait(0.4)
-	await _say("BRIDGE: Lookout, bridge. Range?", 1.2)
-	await _say("LOOKOUT: Estimate twenty thousand yards, sir. Captain's scope, please.", 2.0)
+	await _say("Forward Lookout", "Bridge, Lookout. Contact bearing 323, range 2000 yards.")
+	await _wait(0.8)
+	caption.text = ""
 
 	# Cut to the captain's scope: tight FOV, reticle, hull below the horizon.
 	cam.get_node("Watchstander").visible = false
 	var zoom := create_tween().set_parallel(true)
-	zoom.tween_property(cam, "fov", 7.0, 2.2).set_trans(Tween.TRANS_SINE)
-	zoom.tween_property(scope, "strength", 1.0, 1.6)
-	cam.look_at(contact.global_position + Vector3(0, 28, 0), Vector3.UP)
+	zoom.tween_property(cam, "fov", 4.5, 2.6).set_trans(Tween.TRANS_SINE)
+	zoom.tween_property(scope, "strength", 1.0, 2.0)
+	cam.look_at(contact.global_position + Vector3(0, 14, 0), Vector3.UP)
 	_scope_on = true
-	await _wait(2.4)
-	await _say("CAPTAIN: Tripod foremast... two funnels, turrets fore and aft. Superstructure only.", 3.0)
-	await _say("CAPTAIN: Her hull is still below the horizon. Sound general quarters.", 2.6)
+	await _wait(3.2)
+	await _say("Captain", "Single mast. Possible frigate, can't be sure yet.")
+	await _wait(0.6)
+	await _say("Captain", "She's hull down.")
+	await _wait(0.8)
+	await _say("Captain", "Boatswain, sound General Quarters.")
 
 	# Slow rise of the contact as range closes, then pull back to the title.
 	var rise := create_tween()
-	rise.tween_property(contact, "position:y", -4.0, 3.0)
-	await _wait(2.0)
+	rise.tween_property(contact, "position:y", -5.5, 4.0)
+	await _wait(2.4)
 	var out := create_tween().set_parallel(true)
 	out.tween_property(scope, "strength", 0.0, 1.4)
 	out.tween_property(cam, "fov", 55.0, 2.0).set_trans(Tween.TRANS_SINE)
@@ -273,7 +283,7 @@ func _process(delta: float) -> void:
 	# Idle sway on the bridge, tighter breathing in the scope.
 	var sway := 0.0015 if not _scope_on else 0.0004
 	cam.rotation.z = sin(_t * 0.9) * sway * 6.0
-	scope.bearing = 45.0 + sin(_t * 0.2) * 0.5
+	scope.bearing = CONTACT_BEARING + sin(_t * 0.2) * 0.4
 
 
 func _unhandled_input(event: InputEvent) -> void:
