@@ -28,6 +28,7 @@ var _yaw_forced := false
 var look_up := 0.0           ## test option: raise the look-at point to inspect the sky
 var hud: Hud
 var controls: PlayerControls
+var track: TrackProjection
 var sensors: SensorNet
 var tod_final := 12.0
 var peace := true           ## UI-testing mode: AI ships neither move nor fire. Use --hot for a live battle.
@@ -132,6 +133,8 @@ func _spawn_fleet() -> void:
 	cam_heading = 0.0
 	if not _dist_forced:
 		cam_dist = maxf(70.0, player.wlen() * 1.15)
+	track = TrackProjection.new()
+	add_child(track)
 	sensors = SensorNet.new()
 	add_child(sensors)
 	sensors.setup(terrain, player.team, float(ground["visibility_m"]), tod_final < 5.5 or tod_final > 19.5)
@@ -456,6 +459,7 @@ func _physics_process(delta: float) -> void:
 			(gunnery[player] as Gunnery).fire_at(aim_point, Vector3.ZERO)
 	else:
 		fire_held = false
+	track.update_for(player, float(EngineTelegraph.HELM_ORDERS[controls.helm_ordered][1]), float(EngineTelegraph.ENGINE_ORDERS[controls.engine_ordered][1]))
 	_update_camera(delta)
 	_update_hud()
 

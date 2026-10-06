@@ -53,6 +53,10 @@ const DURABILITY := {
 	"battlecruiser": 5.4, "battleship": 6.0, "carrier": 5.0, "submarine": 3.0,
 }
 static var overpenetrations := 0
+static var collisions := 0
+## Structural damage per joule of crushed energy in a ship-on-ship collision (compartment hit points).
+const RAM_DAMAGE_PER_J := 1.2e-5
+var _ram_cd := 0.0
 var crew_skill: float = 1.0          ## damage-control crew efficacy (captain type feeds this)
 var dc: DamageControl
 var damage_control_enabled := true
@@ -372,6 +376,7 @@ func _physics_process(delta: float) -> void:
 		return
 	_damage_control(delta)
 	_move(delta)
+	_check_collisions(delta)
 	_check_terrain(delta)
 	_check_sinking()
 
@@ -509,3 +514,110 @@ func _sink(delta: float) -> void:
 	rotation.z = move_toward(rotation.z, signf(list_rad if list_rad != 0.0 else 1.0) * 1.4, delta * 0.15)
 	if position.y < -wdraft() * 4.0 - 40.0:
 		queue_free()
+
+
+# --- Ship-on-ship collisions ----------------------------------------------------------
+
+## Hull footprint as an oriented rectangle on the water: [centre, forward axis, side axis, half length, half beam].
+func _footprint() -> Array:
+	return [Vector2(global_position.x, global_position.z), Vector2(sin(heading), cos(heading)),
+			Vector2(cos(heading), -sin(heading)), wlen() * 0.5 * 0.96, wbeam() * 0.5]
+
+
+func _check_collisions(delta: float) -> void:
+	_ram_cd = maxf(0.0, _ram_cd - delta)
+	var fa := _footprint()
+	for n in get_tree().get_nodes_in_group("ships"):
+		var o := n as Ship
+		if o == null or o == self or o.sunk or get_instance_id() > o.get_instance_id():
+			continue                                    # each pair is handled once
+		if global_position.distance_to(o.global_position) > (wlen() + o.wlen()) * 0.5:
+			continue
+		var fb := o._footprint()
+		var hit := _sat(fa, fb)
+		if hit.is_empty():
+			continue
+		_resolve_collision(o, fa, fb, hit["normal"], hit["depth"])
+
+
+## Separating-axis test for two oriented rectangles. Returns {} or {normal (A->B), depth}.
+func _sat(fa: Array, fb: Array) -> Dictionary:
+	var axes: Array[Vector2] = [fa[1], fa[2], fb[1], fb[2]]
+	var d: Vector2 = fb[0] - fa[0]
+	var best := INF
+	var best_n := Vector2.ZERO
+	for ax in axes:
+		var ra: float = fa[3] * absf((fa[1] as Vector2).dot(ax)) + fa[4] * absf((fa[2] as Vector2).dot(ax))
+		var rb: float = fb[3] * absf((fb[1] as Vector2).dot(ax)) + fb[4] * absf((fb[2] as Vector2).dot(ax))
+		var dist := d.dot(ax)
+		var overlap := ra + rb - absf(dist)
+		if overlap <= 0.0:
+			return {}
+		if overlap < best:
+			best = overlap
+			best_n = ax if dist >= 0.0 else -ax
+	return {"normal": best_n, "depth": best}
+
+
+func _resolve_collision(o: Ship, fa: Array, fb: Array, n: Vector2, depth: float) -> void:
+	var ma := displacement_t * 1000.0
+	var mb := o.displacement_t * 1000.0
+	var va := Vector2(velocity_vec().x, velocity_vec().z)
+	var vb := Vector2(o.velocity_vec().x, o.velocity_vec().z)
+	# Contact points: the nearest point of each hull to the other's centre.
+	var pa := _nearest_on(fa, fb[0])
+	var pb := _nearest_on(fb, fa[0])
+	var closing := (va - vb).dot(n)
+	if closing > 0.0:
+		var e := 0.12
+		var j := (1.0 + e) * closing / (1.0 / ma + 1.0 / mb)
+		var dva := -n * (j / ma)
+		var dvb := n * (j / mb)
+		_apply_collision_impulse(va + dva, dva * ma, pa - (fa[0] as Vector2), ma)
+		o._apply_collision_impulse(vb + dvb, dvb * mb, pb - (fb[0] as Vector2), mb)
+		var mu := ma * mb / (ma + mb)
+		var lost := 0.5 * mu * closing * closing * (1.0 - e * e)
+		if closing > 1.0 and _ram_cd <= 0.0 and o._ram_cd <= 0.0:
+			_ram_cd = 1.0
+			o._ram_cd = 1.0
+			Ship.collisions += 1
+			# The lighter ship crumples more: it takes the larger share of the crushed energy.
+			_crush(pa, lost * mb / (ma + mb))
+			o._crush(pb, lost * ma / (ma + mb))
+	# Never overlap: push apart in inverse proportion to mass.
+	var push := n * (depth + 0.05)
+	var wa := mb / (ma + mb)
+	var wb := ma / (ma + mb)
+	global_position -= Vector3(push.x, 0.0, push.y) * wa
+	o.global_position += Vector3(push.x, 0.0, push.y) * wb
+
+
+func _nearest_on(f: Array, p: Vector2) -> Vector2:
+	var rel := p - (f[0] as Vector2)
+	var x := clampf(rel.dot(f[2]), -float(f[4]), float(f[4]))
+	var z := clampf(rel.dot(f[1]), -float(f[3]), float(f[3]))
+	return (f[0] as Vector2) + (f[2] as Vector2) * x + (f[1] as Vector2) * z
+
+
+## Take the post-impact velocity (world XZ) back into the ship's speed-along-heading model, and
+## twist the heading by the off-centre impulse.
+func _apply_collision_impulse(new_v: Vector2, impulse: Vector2, r: Vector2, mass_kg: float) -> void:
+	var fwd := Vector2(sin(heading), cos(heading))
+	speed_ms = new_v.dot(fwd)
+	var inertia := mass_kg * (wlen() * wlen() + wbeam() * wbeam()) / 12.0
+	var torque := r.y * impulse.x - r.x * impulse.y
+	heading += clampf(torque / inertia, -0.15, 0.15) * 0.5
+
+
+func _crush(world_contact: Vector2, joules: float) -> void:
+	var local := to_local(Vector3(world_contact.x, 0.0, world_contact.y))
+	local.y = -1.0
+	var dmg := joules * RAM_DAMAGE_PER_J
+	if dmg < 1.0:
+		return
+	_detonate(local, {"damage": dmg, "radius": 8.0 + minf(dmg * 0.002, 14.0), "pen_mm": 0, "dir": Vector3.UP})
+	for c in compartments:
+		if c.below_waterline and c.distance_to(local) < 7.0 and c.health_fraction() < 0.9:
+			c.flood_rate = maxf(c.flood_rate, (1.0 - c.health_fraction()) * 6.0)
+	if is_inside_tree():
+		Fx.impact(self, to_global(local), clampf(sqrt(joules) * 0.02, 60.0, 400.0))
