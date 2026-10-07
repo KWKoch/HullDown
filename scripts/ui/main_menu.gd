@@ -37,8 +37,6 @@ var ship_sub: Label
 var ship_desc: Label
 var ship_price: Label
 var select_btn: Button
-var nation_filter: OptionButton
-var type_filter: OptionButton
 var _browse_id := ""
 var _row_btns := {}
 
@@ -68,6 +66,7 @@ func _ready() -> void:
 	_fit_pages()
 	_build_overlay()
 	_browse_id = GameSession.ship_id
+	_fleet_nation = "USA"
 	_refresh_selection()
 	_show_tab(_start_tab())
 	_fill_list()
@@ -249,7 +248,7 @@ func fullscreen_button_pos() -> Vector2:
 func _fit_pages() -> void:
 	for i in pages.size():
 		var pg := pages[i]
-		if i == 0:
+		if i != 2:
 			pg.set_meta("y0", 0.0)
 			continue
 		var sc := CONTENT_W / 1920.0
@@ -491,44 +490,69 @@ func _launch() -> void:
 
 # --- FLEET STORE ----------------------------------------------------------------
 
+const CLASS_ORDER := ["battleship", "battlecruiser", "carrier", "heavy_cruiser", "light_cruiser", "destroyer", "escort", "motor_torpedo_boat", "submarine"]
+const CLASS_NAMES := {"battleship": "BATTLESHIP", "battlecruiser": "BATTLECRUISER", "carrier": "CARRIER", "heavy_cruiser": "HEAVY CRUISER",
+	"light_cruiser": "LIGHT CRUISER", "destroyer": "DESTROYER", "escort": "ESCORT", "motor_torpedo_boat": "TORPEDO BOAT", "submarine": "SUBMARINE"}
+
+var _fleet_nation := "USA"
+var _nation_btns := {}
+var _class_pick := {}            ## type -> index of the ship shown for that class
+var _class_ships := {}           ## type -> Array of entries, biggest first
+var ship_count_lbl: Label
+
+
+## FLEET STORE: pick a navy, then one tile per ship class. A tile shows one ship; tapping the
+## selected tile again steps to the next ship of that class. Details get the big type.
 func _build_fleet() -> Control:
 	var page := Control.new()
-	page.position = Vector2(0, 92)
-	page.size = Vector2(1920, 988)
-	var left := Panel.new()
-	left.add_theme_stylebox_override("panel", UIKit.glass(18.0, 0.7))
-	left.position = Vector2(24, 20)
-	left.size = Vector2(420, 944)
-	page.add_child(left)
-	nation_filter = OptionButton.new()
-	nation_filter.add_item("All nations")
-	for n in Roster.nations():
-		nation_filter.add_item(String(n))
-	nation_filter.position = Vector2(14, 14)
-	nation_filter.size = Vector2(190, 38)
-	nation_filter.item_selected.connect(func(_i): _fill_list())
-	left.add_child(nation_filter)
-	type_filter = OptionButton.new()
-	type_filter.add_item("All classes")
-	for t in ["battleship", "heavy_cruiser", "light_cruiser", "destroyer", "escort", "carrier"]:
-		type_filter.add_item(t.replace("_", " ").capitalize())
-	type_filter.position = Vector2(216, 14)
-	type_filter.size = Vector2(190, 38)
-	type_filter.item_selected.connect(func(_i): _fill_list())
-	left.add_child(type_filter)
-	var sc := ScrollContainer.new()
-	sc.position = Vector2(8, 64)
-	sc.size = Vector2(404, 870)
-	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	left.add_child(sc)
+	page.position = Vector2.ZERO
+	page.size = Vector2(CONTENT_W, 1080)
+	var m := 24.0
+	var cap := _lbl("SELECT FLEET", 16, DIM)
+	cap.add_theme_font_override("font", UIKit.font("caps"))
+	cap.position = Vector2(m + 4, m + 20)
+	page.add_child(cap)
+	var navs: Array = Roster.nations()
+	navs.sort_custom(func(x, y): return (0 if x == "USA" else 1) < (0 if y == "USA" else 1) or ((x == "USA") == (y == "USA") and String(x) < String(y)))
+	var x := m + 170.0
+	var cw := (CONTENT_W - x - m - 10.0 * (navs.size() - 1)) / float(navs.size())
+	for n in navs:
+		var nb := Button.new()
+		nb.text = "UK" if String(n) == "United Kingdom" else String(n).to_upper()
+		nb.focus_mode = Control.FOCUS_NONE
+		nb.add_theme_font_override("font", UIKit.font("caps"))
+		nb.add_theme_font_size_override("font_size", 20)
+		nb.position = Vector2(x, m)
+		nb.size = Vector2(cw, 64)
+		nb.pressed.connect(_set_fleet.bind(String(n)))
+		page.add_child(nb)
+		_nation_btns[String(n)] = nb
+		x += cw + 10.0
+	var top := m * 2.0 + 64.0
+	var h := 1080.0 - top - m
+	# Class tiles.
 	ship_list = VBoxContainer.new()
-	ship_list.custom_minimum_size = Vector2(392, 0)
-	ship_list.add_theme_constant_override("separation", 6)
-	sc.add_child(ship_list)
-
+	ship_list.position = Vector2(m, top)
+	ship_list.size = Vector2(390, h)
+	ship_list.add_theme_constant_override("separation", 10)
+	page.add_child(ship_list)
+	# Centre: ship name, 3D view, then description, price and select.
+	var cx := m * 2.0 + 390.0
+	var cwid := 480.0
+	ship_title = _lbl("", 40, GOLD, true)
+	ship_title.position = Vector2(cx + 4, top - 6)
+	ship_title.size = Vector2(cwid, 52)
+	page.add_child(ship_title)
+	ship_sub = _lbl("", 20, DIM)
+	ship_sub.position = Vector2(cx + 6, top + 48)
+	page.add_child(ship_sub)
+	ship_count_lbl = _lbl("", 16, Color(UIKit.CYAN.r, UIKit.CYAN.g, UIKit.CYAN.b, 0.9))
+	ship_count_lbl.add_theme_font_override("font", UIKit.font("caps"))
+	ship_count_lbl.position = Vector2(cx + 6, top + 80)
+	page.add_child(ship_count_lbl)
 	viewer = ShipViewer.new()
-	viewer.position = Vector2(460, 20)
-	viewer.size = Vector2(800, 944)
+	viewer.position = Vector2(cx, top + 112)
+	viewer.size = Vector2(cwid, 420)
 	page.add_child(viewer)
 	var vframe := Panel.new()
 	vframe.add_theme_stylebox_override("panel", UIKit.box(Color(0, 0, 0, 0), Color(0, 0, 0, 0), Color(1, 1, 1, 0.2), 14.0, 0.0, Color(0, 0, 0, 0), 0.0))
@@ -536,97 +560,145 @@ func _build_fleet() -> Control:
 	vframe.size = viewer.size
 	vframe.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	page.add_child(vframe)
-	var hint := _lbl("drag to rotate  -  wheel to zoom", 13, DIM)
-	hint.position = Vector2(480, 936)
+	var hint := _lbl("drag to rotate", 13, DIM)
+	hint.position = viewer.position + Vector2(14, viewer.size.y - 26)
 	page.add_child(hint)
-
+	ship_desc = _lbl("", 19, Color(0.84, 0.89, 0.94), true)
+	ship_desc.position = Vector2(cx + 4, top + 548)
+	ship_desc.size = Vector2(cwid - 8, 170)
+	page.add_child(ship_desc)
+	ship_price = _lbl("", 28, INK)
+	ship_price.position = Vector2(cx + 4, 1080 - m - 140)
+	page.add_child(ship_price)
+	select_btn = _primary(_btn("SELECT FOR SKIRMISH", _select_ship, Color(0.4, 0.9, 0.5), 26), Color("4ade80"))
+	select_btn.position = Vector2(cx, 1080 - m - 90)
+	select_btn.size = Vector2(cwid, 90)
+	page.add_child(select_btn)
+	# Right: capabilities, large.
+	var rx := cx + cwid + m
 	var right := Panel.new()
 	right.add_theme_stylebox_override("panel", UIKit.glass(18.0, 0.7))
-	right.position = Vector2(1276, 20)
-	right.size = Vector2(620, 944)
+	right.position = Vector2(rx, top)
+	right.size = Vector2(CONTENT_W - rx - m, h)
 	page.add_child(right)
-	ship_title = _lbl("", 28, GOLD, true)
-	ship_title.position = Vector2(20, 14)
-	ship_title.size = Vector2(580, 40)
-	right.add_child(ship_title)
-	ship_sub = _lbl("", 16, DIM)
-	ship_sub.position = Vector2(22, 56)
-	right.add_child(ship_sub)
+	var rc := _lbl("CAPABILITIES", 16, DIM)
+	rc.add_theme_font_override("font", UIKit.font("caps"))
+	rc.position = Vector2(24, 18)
+	right.add_child(rc)
 	stats = ShipStats.new()
-	stats.position = Vector2(14, 100)
-	stats.size = Vector2(596, 330)
+	stats.stacked = true
+	stats.position = Vector2(14, 50)
+	stats.size = Vector2(right.size.x - 28, h - 64)
+	stats.k = minf(stats.size.x / 470.0, stats.size.y / 745.0)
 	right.add_child(stats)
-	ship_desc = _lbl("", 17, Color(0.82, 0.87, 0.92), true)
-	ship_desc.position = Vector2(22, 450)
-	ship_desc.size = Vector2(576, 150)
-	right.add_child(ship_desc)
-	ship_price = _lbl("", 26, INK)
-	ship_price.position = Vector2(22, 760)
-	right.add_child(ship_price)
-	var own := _lbl("OWNED  (test build: every ship is unlocked)", 15, Color(0.5, 1.0, 0.6))
-	own.position = Vector2(22, 800)
-	right.add_child(own)
-	select_btn = _primary(_btn("SELECT FOR SKIRMISH", _select_ship, Color(0.4, 0.9, 0.5), 24), Color("4ade80"))
-	select_btn.position = Vector2(22, 840)
-	select_btn.size = Vector2(576, 78)
-	right.add_child(select_btn)
 	return page
+
+
+func _set_fleet(n: String) -> void:
+	_fleet_nation = n
+	_fill_list()
+	# Show the selected class's ship of this navy (or the first class).
+	var first := ""
+	for t in CLASS_ORDER:
+		if _class_ships.has(t):
+			first = t
+			break
+	var cur := Roster.get_entry(_browse_id)
+	if cur.is_empty() or cur["nation"] != n:
+		if first != "":
+			_browse(String(_class_ships[first][0]["id"]))
+	else:
+		_style_rows()
 
 
 func _fill_list() -> void:
 	for c in ship_list.get_children():
 		c.queue_free()
 	_row_btns.clear()
-	var nat := "" if nation_filter.selected <= 0 else nation_filter.get_item_text(nation_filter.selected)
-	var typ := "" if type_filter.selected <= 0 else type_filter.get_item_text(type_filter.selected).to_lower().replace(" ", "_")
-	var list: Array = Roster.available().duplicate()
-	var order := ["battleship", "heavy_cruiser", "light_cruiser", "destroyer", "escort", "carrier", "submarine"]
-	list.sort_custom(func(a, b):
-		if a["nation"] != b["nation"]:
-			return String(a["nation"]) < String(b["nation"])
-		var ia := order.find(a["type"])
-		var ib := order.find(b["type"])
-		if ia != ib:
-			return ia < ib
-		return float(a["displacement_t"]) > float(b["displacement_t"]))
-	for e in list:
-		if nat != "" and e["nation"] != nat:
+	_class_ships.clear()
+	for e in Roster.by_nation(_fleet_nation):
+		var t: String = e["type"]
+		if not _class_ships.has(t):
+			_class_ships[t] = []
+		_class_ships[t].append(e)
+	for t in _class_ships:
+		(_class_ships[t] as Array).sort_custom(func(a, b): return float(a["displacement_t"]) > float(b["displacement_t"]))
+	var n := 0
+	for t in CLASS_ORDER:
+		if _class_ships.has(t):
+			n += 1
+	var th := clampf((ship_list.size.y - 10.0 * (n - 1)) / maxf(n, 1), 96.0, 140.0)
+	for t in CLASS_ORDER:
+		if not _class_ships.has(t):
 			continue
-		if typ != "" and e["type"] != typ:
-			continue
+		var list: Array = _class_ships[t]
+		var idx: int = clampi(int(_class_pick.get(t, 0)), 0, list.size() - 1)
+		var e: Dictionary = list[idx]
 		var b := Button.new()
 		b.focus_mode = Control.FOCUS_NONE
-		b.custom_minimum_size = Vector2(388, 66)
-		var id: String = e["id"]
-		b.pressed.connect(_browse.bind(id))
+		b.custom_minimum_size = Vector2(390, th)
+		b.pressed.connect(_class_tapped.bind(t))
+		var nc := _nation_color(_fleet_nation)
+		var stripe := Panel.new()
+		stripe.add_theme_stylebox_override("panel", UIKit.box(nc.lightened(0.15), nc.darkened(0.3), Color(0, 0, 0, 0), 3.0, 0.0, Color(nc.r, nc.g, nc.b, 0.4), 0.0))
+		stripe.position = Vector2(12, 16)
+		stripe.size = Vector2(6, th - 32)
+		stripe.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		b.add_child(stripe)
+		var cl := Label.new()
+		cl.text = CLASS_NAMES.get(t, t.to_upper())
+		cl.add_theme_font_override("font", UIKit.font("caps"))
+		cl.add_theme_font_size_override("font_size", 16)
+		cl.add_theme_color_override("font_color", DIM)
+		cl.position = Vector2(32, th * 0.5 - 36)
+		cl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		b.add_child(cl)
 		var nm := Label.new()
-		nm.text = String(e["name"])
+		nm.text = String(e["name"]).get_slice(" (", 0)
 		nm.add_theme_font_override("font", UIKit.font("semi"))
-		nm.add_theme_font_size_override("font_size", 16)
+		nm.add_theme_font_size_override("font_size", 26)
 		nm.add_theme_color_override("font_color", INK)
-		nm.position = Vector2(26, 9)
-		nm.size = Vector2(350, 24)
+		nm.position = Vector2(32, th * 0.5 - 14)
+		nm.size = Vector2(340, 34)
 		nm.clip_text = true
 		nm.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		b.add_child(nm)
-		var sb := Label.new()
-		sb.text = "%s  -  %s" % [String(e["type"]).replace("_", " ").to_upper(), String(e["nation"]).to_upper()]
-		sb.add_theme_font_override("font", UIKit.font("caps"))
-		sb.add_theme_font_size_override("font_size", 11)
-		sb.add_theme_color_override("font_color", DIM)
-		sb.position = Vector2(26, 37)
-		sb.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		b.add_child(sb)
-		var nc := _nation_color(String(e["nation"]))
-		var stripe := Panel.new()
-		stripe.add_theme_stylebox_override("panel", UIKit.box(nc.lightened(0.15), nc.darkened(0.3), Color(0, 0, 0, 0), 3.0, 0.0, Color(nc.r, nc.g, nc.b, 0.4), 0.0))
-		stripe.position = Vector2(11, 14)
-		stripe.size = Vector2(5, 38)
-		stripe.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		b.add_child(stripe)
+		if list.size() > 1:
+			var more := Label.new()
+			more.text = "%d of %d   >" % [idx + 1, list.size()]
+			more.add_theme_font_override("font", UIKit.font("caps"))
+			more.add_theme_font_size_override("font_size", 14)
+			more.add_theme_color_override("font_color", Color(UIKit.CYAN.r, UIKit.CYAN.g, UIKit.CYAN.b, 0.85))
+			more.position = Vector2(300, th * 0.5 - 36)
+			more.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			b.add_child(more)
 		ship_list.add_child(b)
-		_row_btns[id] = b
+		_row_btns[t] = b
+	for nn in _nation_btns:
+		var on: bool = nn == _fleet_nation
+		var col := _nation_color(nn)
+		var bx := UIKit.box(col.darkened(0.1) if on else Color(1, 1, 1, 0.05), col.darkened(0.55) if on else Color(1, 1, 1, 0.02),
+			Color(col.r, col.g, col.b, 0.95) if on else Color(1, 1, 1, 0.14), 16.0, 0.0, Color(col.r, col.g, col.b, 0.35) if on else Color(0, 0, 0, 0), 8.0)
+		var nbt: Button = _nation_btns[nn]
+		for st in ["normal", "hover", "pressed"]:
+			nbt.add_theme_stylebox_override(st, bx)
+		nbt.add_theme_color_override("font_color", Color.WHITE if on else DIM)
+		nbt.add_theme_color_override("font_hover_color", Color.WHITE)
 	_style_rows()
+
+
+## Tap a class tile: show its ship; tap the tile that is already showing to step to the next ship.
+func _class_tapped(t: String) -> void:
+	var list: Array = _class_ships.get(t, [])
+	if list.is_empty():
+		return
+	var idx: int = int(_class_pick.get(t, 0))
+	var cur := Roster.get_entry(_browse_id)
+	if not cur.is_empty() and cur["type"] == t and cur["nation"] == _fleet_nation and list.size() > 1:
+		idx = (idx + 1) % list.size()
+	_class_pick[t] = idx
+	_fill_list()
+	_browse(String(list[idx]["id"]))
 
 
 func _nation_color(n: String) -> Color:
@@ -642,15 +714,17 @@ func _nation_color(n: String) -> Color:
 
 
 func _style_rows() -> void:
-	for id in _row_btns:
-		var b: Button = _row_btns[id]
-		var sel: bool = (id == _browse_id)
-		var chosen: bool = (id == GameSession.ship_id)
-		var acc := GOLD if sel else (UIKit.GREEN if chosen else Color(1, 1, 1))
+	var cur := Roster.get_entry(_browse_id)
+	var chosen := Roster.get_entry(GameSession.ship_id)
+	for t in _row_btns:
+		var b: Button = _row_btns[t]
+		var sel: bool = not cur.is_empty() and cur["type"] == t and cur["nation"] == _fleet_nation
+		var has_chosen: bool = not chosen.is_empty() and chosen["type"] == t and chosen["nation"] == _fleet_nation
+		var acc := GOLD if sel else (UIKit.GREEN if has_chosen else Color(1, 1, 1))
 		var n := UIKit.box(Color(0.30, 0.22, 0.08, 0.95) if sel else Color(0.12, 0.17, 0.26, 0.85), Color(0.15, 0.11, 0.05, 0.95) if sel else Color(0.07, 0.10, 0.16, 0.85),
-			Color(acc.r, acc.g, acc.b, 0.85 if (sel or chosen) else 0.13), 12.0, 0.0, Color(GOLD.r, GOLD.g, GOLD.b, 0.3) if sel else Color(0, 0, 0, 0), 6.0)
+			Color(acc.r, acc.g, acc.b, 0.85 if (sel or has_chosen) else 0.13), 14.0, 0.0, Color(GOLD.r, GOLD.g, GOLD.b, 0.3) if sel else Color(0, 0, 0, 0), 6.0)
 		b.add_theme_stylebox_override("normal", n)
-		b.add_theme_stylebox_override("hover", UIKit.box(Color(0.2, 0.28, 0.4, 0.95), Color(0.12, 0.17, 0.26, 0.95), Color(UIKit.CYAN.r, UIKit.CYAN.g, UIKit.CYAN.b, 0.7), 12.0, 0.0, Color(UIKit.CYAN.r, UIKit.CYAN.g, UIKit.CYAN.b, 0.22), 6.0))
+		b.add_theme_stylebox_override("hover", UIKit.box(Color(0.2, 0.28, 0.4, 0.95), Color(0.12, 0.17, 0.26, 0.95), Color(UIKit.CYAN.r, UIKit.CYAN.g, UIKit.CYAN.b, 0.7), 14.0, 0.0, Color(UIKit.CYAN.r, UIKit.CYAN.g, UIKit.CYAN.b, 0.22), 6.0))
 		b.add_theme_stylebox_override("pressed", n)
 
 
@@ -659,12 +733,20 @@ func _browse(id: String) -> void:
 	if e.is_empty():
 		return
 	_browse_id = id
+	if e["nation"] != _fleet_nation:
+		_fleet_nation = String(e["nation"])
+		_fill_list()
+	var cls: Array = _class_ships.get(String(e["type"]), [])
+	for i in cls.size():
+		if cls[i]["id"] == id:
+			_class_pick[String(e["type"])] = i
+	ship_count_lbl.text = ("SHIP %d OF %d IN CLASS  -  TAP THE TILE AGAIN FOR THE NEXT" % [int(_class_pick.get(String(e["type"]), 0)) + 1, cls.size()]) if cls.size() > 1 else ""
 	ship_title.text = String(e["name"])
 	ship_sub.text = "%s  -  %s  -  %s" % [e["nation"], String(e["type"]).replace("_", " ").capitalize(), "launched class"]
 	ship_sub.text = "%s  -  %s" % [e["nation"], String(e["type"]).replace("_", " ").capitalize()]
 	stats.show_entry(e)
 	ship_desc.text = String(TYPE_BLURB.get(e["type"], "")) + "\n\n" + _detail(e)
-	ship_price.text = "PRICE   %s credits  (placeholder)" % _price_str(e)
+	ship_price.text = "PRICE   %s credits" % _price_str(e)
 	viewer.show_ship(e)
 	_style_rows()
 	_update_select_btn()

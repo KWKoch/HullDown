@@ -35,6 +35,10 @@ static func _armour(e: Dictionary) -> float:
 	return float(a.get("belt_mm", 0)) * 0.5 + float(a.get("deck_mm", 0)) * 0.7 + float(a.get("turret_mm", 0)) * 0.3
 
 
+var k := 1.0               ## draw scale (layout in size/k units)
+var stacked := false       ## radar on top, bars underneath at full width
+
+
 func show_entry(e: Dictionary) -> void:
 	entry = e
 	queue_redraw()
@@ -60,8 +64,10 @@ func _draw() -> void:
 	var fbody := UIKit.font("body")
 	var m := _norms()
 	var gold := UIKit.GOLD
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2(k, k))
+	var ls := size / k
 	# --- radar ---
-	var c := Vector2(150, 150)
+	var c := Vector2(ls.x * 0.5, 150) if stacked else Vector2(150, 150)
 	var rad := 100.0
 	var vals := _radar_values()
 	for ring in [0.25, 0.5, 0.75, 1.0]:
@@ -84,8 +90,9 @@ func _draw() -> void:
 		draw_line(c, c + dir * rad, Color(0.6, 0.75, 0.95, 0.14), 1.0, true)
 		poly.append(c + dir * rad * clampf(vals[k], 0.05, 1.0))
 		var lp := c + dir * (rad + 24.0)
-		var w := fcaps.get_string_size(AXES[k], HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-		draw_string(fcaps, lp + Vector2(-w * 0.5, 4), AXES[k], HORIZONTAL_ALIGNMENT_LEFT, -1, 11, UIKit.DIM)
+		var afs := 14 if stacked else 11
+		var w := fcaps.get_string_size(AXES[k], HORIZONTAL_ALIGNMENT_LEFT, -1, afs).x
+		draw_string(fcaps, lp + Vector2(-w * 0.5, 5), AXES[k], HORIZONTAL_ALIGNMENT_LEFT, -1, afs, UIKit.DIM)
 	# glow layers then the shape
 	var glow_loop := poly.duplicate()
 	glow_loop.append(poly[0])
@@ -117,18 +124,22 @@ func _draw() -> void:
 		["DISPLACEMENT", "%s t" % _fmt(float(entry["displacement_t"])), pow(float(entry["displacement_t"]) / m["disp"], 0.6)],
 		["LENGTH", "%.0f m" % float(entry["length_m"]), float(entry["length_m"]) / 280.0],
 	]
-	var x0 := 320.0
-	var y := 28.0
-	var bw := size.x - x0 - 10.0
+	var x0 := 10.0 if stacked else 320.0
+	var y := 330.0 if stacked else 28.0
+	var bw := ls.x - x0 - 10.0
+	var fl := 14 if stacked else 10
+	var fv := 19 if stacked else 14
+	var bh := 9.0 if stacked else 6.0
+	var step := 34.0 if stacked else 26.0
 	for r in rows:
-		draw_string(fcaps, Vector2(x0, y), r[0], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, UIKit.DIM)
+		draw_string(fcaps, Vector2(x0, y), r[0], HORIZONTAL_ALIGNMENT_LEFT, -1, fl, UIKit.DIM)
 		var vs: String = r[1]
-		var vw := fsemi.get_string_size(vs, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
-		draw_string(fsemi, Vector2(size.x - 10.0 - vw, y), vs, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1, 0.97, 0.9))
-		UIKit.fill_round(self, Rect2(x0, y + 6, bw, 6), 3.0, Color(1, 1, 1, 0.09), Color(1, 1, 1, 0.05))
+		var vw := fsemi.get_string_size(vs, HORIZONTAL_ALIGNMENT_LEFT, -1, fv).x
+		draw_string(fsemi, Vector2(ls.x - 10.0 - vw, y + (2.0 if stacked else 0.0)), vs, HORIZONTAL_ALIGNMENT_LEFT, -1, fv, Color(1, 0.97, 0.9))
+		UIKit.fill_round(self, Rect2(x0, y + 7, bw, bh), bh * 0.5, Color(1, 1, 1, 0.09), Color(1, 1, 1, 0.05))
 		var fw := maxf(bw * clampf(float(r[2]), 0.02, 1.0), 6.0)
-		UIKit.fill_round(self, Rect2(x0, y + 6, fw, 6), 3.0, Color("ffd77a"), Color("e8962a"))
-		y += 26.0
+		UIKit.fill_round(self, Rect2(x0, y + 7, fw, bh), bh * 0.5, Color("ffd77a"), Color("e8962a"))
+		y += step
 
 
 func _fmt(v: float) -> String:

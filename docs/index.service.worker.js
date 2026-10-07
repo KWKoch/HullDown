@@ -4,7 +4,7 @@
 // Incrementing CACHE_VERSION will kick off the install event and force
 // previously cached resources to be updated from the network.
 /** @type {string} */
-const CACHE_VERSION = '1791365398|4510389';
+const CACHE_VERSION = '1791365689|3918137';
 /** @type {string} */
 const CACHE_PREFIX = 'Hull Down-sw-cache-';
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;
