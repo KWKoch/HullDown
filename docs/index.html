@@ -93,7 +93,7 @@ body {
 		<link id="-gd-engine-icon" rel="icon" type="image/png" href="index.icon.png" />
 <link rel="apple-touch-icon" href="index.apple-touch-icon.png"/>
 <link rel="manifest" href="index.manifest.json">
-<meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Broadside"><script>if('serviceWorker' in navigator){navigator.serviceWorker.getRegistration().then(function(r){if(!r)return;function kick(w){if(w&&navigator.serviceWorker.controller){w.postMessage('update');}}if(r.waiting)kick(r.waiting);r.addEventListener('updatefound',function(){var n=r.installing;if(!n)return;n.addEventListener('statechange',function(){if(n.state==='installed')kick(n);});});r.update();});}</script>
+<meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Broadside"><script>window.BUILD_ID='20261007095359';(function(){function chk(){fetch('version.txt?'+Date.now(),{cache:'no-store'}).then(function(r){return r.ok?r.text():'';}).then(function(v){v=(v||'').trim();if(v&&v!==window.BUILD_ID&&!sessionStorage.getItem('hdReload'+v)){sessionStorage.setItem('hdReload'+v,'1');location.reload();}}).catch(function(){});}document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')chk();});window.addEventListener('pageshow',chk);if('serviceWorker' in navigator){navigator.serviceWorker.getRegistration().then(function(r){if(r){r.update();}});}})();</script>
 	</head>
 	<body>
 		<canvas id="canvas">
