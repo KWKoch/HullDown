@@ -3,7 +3,7 @@ extends Node3D
 ## Controls (keyboard and the identical on-screen buttons): W/S ring the engine telegraph,
 ## A/D step the helm (X centres), Space / LMB / FIRE button fire at the aim point, C cycles the camera.
 ## PC: hold RMB + move to orbit, wheel zooms, the cursor aims.  Touch: one-finger drag orbits,
-## pinch zooms, tap designates the aim point.  [ / ] cycle your ship. F1-F7 pick a battleground.
+## the screen centre is the sight, pinch zooms, SCOPE magnifies, FIRE is held.  [ / ] cycle your ship. F1-F7 pick a battleground.
 
 const TEAM_SIZE := 15            ## ships per side: the player plus 14 AI allies against 15 AI opponents
 const OPPONENTS := TEAM_SIZE
@@ -15,8 +15,8 @@ var terrain: BattleTerrain
 var player: Ship
 var gunnery: Dictionary = {}       ## Ship -> Gunnery
 var cam: Camera3D
-enum CamMode { CHASE, BROADSIDE, OVERHEAD, BRIDGE }
-const CAM_NAMES := ["CHASE", "BROADSIDE", "OVERHEAD", "BRIDGE"]
+enum CamMode { CHASE, BROADSIDE, OVERHEAD, BRIDGE, AIM }
+const CAM_NAMES := ["CHASE", "BROADSIDE", "OVERHEAD", "BRIDGE", "AIM"]
 var cam_mode := CamMode.CHASE
 var cam_yaw := PI + 0.55    ## relative to the ship's heading: PI = dead astern; offset gives a 3/4 quarter view
 var cam_pitch := 0.24
@@ -35,8 +35,12 @@ var sensors: SensorNet
 var tod_final := 12.0
 var peace := true           ## UI-testing mode: AI ships neither move nor fire. Use --hot for a live battle.
 var fire_held := false
-var touch_aim_world := Vector3.ZERO
-var touch_aiming := false
+var reticle_aim := false     ## true once a finger is on the screen: the centre reticle, not a cursor, aims
+var aim_yaw := 0.0           ## AIM camera look direction, world frame
+var aim_pitch := -0.012
+var zoom_k := 1.0            ## lens zoom: 1 = wide, small = telephoto (the SCOPE button and pinch)
+var zoom_target := 1.0
+const SCOPE_K := 0.2
 var _touches: Dictionary = {}
 var _pinch_last := 0.0
 var _tap_start := {}
@@ -277,7 +281,12 @@ func _is_emulated(event: InputEvent) -> bool:
 
 
 func _orbit(rel: Vector2) -> void:
-	if cam_mode == CamMode.BRIDGE:
+	if cam_mode == CamMode.AIM:
+		# Full-width drag = one field of view, so the swing slows as the lens zooms in.
+		var sens := deg_to_rad(cam.fov) / maxf(get_viewport().get_visible_rect().size.x, 1.0) * (1.0 if cam.keep_aspect == Camera3D.KEEP_WIDTH else 1.6)
+		aim_yaw -= rel.x * sens
+		aim_pitch = clampf(aim_pitch - rel.y * sens, -0.6, 0.3)
+	elif cam_mode == CamMode.BRIDGE:
 		bridge_yaw -= rel.x * 0.004
 		bridge_pitch = clampf(bridge_pitch - rel.y * 0.004, -0.5, 0.7)
 	else:
@@ -286,6 +295,9 @@ func _orbit(rel: Vector2) -> void:
 
 
 func _zoom(factor: float) -> void:
+	if cam_mode == CamMode.AIM:
+		zoom_target = clampf(zoom_target * factor, 0.06, 1.0)
+		return
 	cam_dist = clampf(cam_dist * factor, 25.0, 2500.0)
 
 
@@ -308,14 +320,20 @@ func _cycle_camera() -> void:
 		CamMode.BRIDGE:
 			bridge_yaw = 0.0
 			bridge_pitch = 0.0
+		CamMode.AIM:
+			aim_yaw = player.heading
+			aim_pitch = -0.012
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if player == null:
 		return
-	# Touch (real fingers only; emulated mouse events from touch are ignored here).
+	# Touch (real fingers only; emulated mouse events from touch are ignored here). One finger
+	# swings the aim, two fingers zoom, a short tap on a ship slews onto it. FIRE, SCOPE, the
+	# telegraph and the helm are handled by the HUD, so they work while another finger aims.
 	if event is InputEventScreenTouch:
 		var st := event as InputEventScreenTouch
+		reticle_aim = true
 		if st.pressed:
 			if hud != null and hud.is_over_ui(st.position):
 				return
@@ -328,13 +346,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			if _tap_start.has(st.index):
 				var ts: Dictionary = _tap_start[st.index]
 				var moved := (ts["pos"] as Vector2).distance_to(st.position)
-				if moved < 14.0 and Time.get_ticks_msec() - int(ts["t"]) < 350 and _touches.size() == 1:
-					_designate_aim(st.position)
+				if moved < 16.0 and Time.get_ticks_msec() - int(ts["t"]) < 300 and _touches.size() == 1:
+					_tap_slew(st.position)
 			_touches.erase(st.index)
 			_tap_start.erase(st.index)
 		return
 	if event is InputEventScreenDrag:
 		var sd := event as InputEventScreenDrag
+		reticle_aim = true
 		if not _touches.has(sd.index):
 			return
 		_touches[sd.index] = sd.position
@@ -351,7 +370,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	# Mouse.
 	if event is InputEventMouseMotion:
-		touch_aiming = false
+		reticle_aim = false
 		if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
 			_orbit((event as InputEventMouseMotion).relative)
 	elif event is InputEventMouseButton:
@@ -497,8 +516,8 @@ func _physics_process(delta: float) -> void:
 			aim_point = player.global_position + Vector3(sin(player.heading + 0.12), 0, cos(player.heading + 0.12)) * d
 		elif OS.get_cmdline_user_args().has("--autoaim"):
 			_autoaim()
-		elif touch_aiming:
-			aim_point = touch_aim_world
+		elif reticle_aim:
+			aim_point = _reticle_aim()
 		else:
 			_update_aim_point(get_viewport().get_mouse_position())
 		(gunnery[player] as Gunnery).aim_at(aim_point)      # the turrets always swing toward the aim point
@@ -570,6 +589,7 @@ var _wounded := false
 
 
 func _update_camera(delta: float) -> void:
+	zoom_k = lerpf(zoom_k, zoom_target, 1.0 - exp(-9.0 * delta))
 	cam_heading = lerp_angle(cam_heading, player.heading, 1.0 - exp(-2.5 * delta))
 	if cam_mode == CamMode.BRIDGE:
 		var bp := player.global_position + Vector3(0, player.wlen() * 0.05 + 6.0, 0)
@@ -581,15 +601,42 @@ func _update_camera(delta: float) -> void:
 		var look := Vector3(sin(a) * cos(bridge_pitch), sin(bridge_pitch), cos(a) * cos(bridge_pitch))
 		cam.global_position = bp
 		cam.look_at(bp + look * 100.0, Vector3.UP)
-		cam.fov = 70.0
+		_apply_lens()
 		return
-	cam.fov = 70.0
+	if cam_mode == CamMode.AIM:
+		# Over-the-stern sight camera: it looks exactly where the player aims, from behind and above
+		# the ship, and the reticle ray gives the range (or the range of the ship it lies over).
+		var adir := Vector3(sin(aim_yaw) * cos(aim_pitch), sin(aim_pitch), cos(aim_yaw) * cos(aim_pitch))
+		var flat := Vector3(sin(aim_yaw), 0.0, cos(aim_yaw))
+		var back := maxf(60.0, player.wlen() * 0.8)
+		cam.global_position = player.global_position + Vector3(0, clampf(player.wlen() * 0.03, 3.0, 20.0), 0) - flat * back + Vector3(0, maxf(22.0, back * 0.34), 0)
+		cam.look_at(cam.global_position + adir * 100.0, Vector3.UP)
+		_apply_lens()
+		return
 	var focus_h := clampf(player.wlen() * 0.04, 4.0, 28.0)
 	var focus := player.global_position + Vector3(0, focus_h, 0)
 	var yaw := cam_heading + cam_yaw
 	var dir := Vector3(sin(yaw) * cos(cam_pitch), sin(cam_pitch), cos(yaw) * cos(cam_pitch))
 	cam.global_position = focus + dir * cam_dist
 	cam.look_at(focus + Vector3(0, look_up, 0), Vector3.UP)
+	_apply_lens()
+
+
+## Field of view (wide in portrait, which fixes the width), zoom, and the slight downward tilt that
+## puts the view's centre line through the reticle rather than the middle of the screen, which the
+## control deck partly covers.
+func _apply_lens() -> void:
+	var portrait: bool = hud != null and hud.portrait
+	cam.keep_aspect = Camera3D.KEEP_WIDTH if portrait else Camera3D.KEEP_HEIGHT
+	cam.fov = (62.0 if portrait else 70.0) * zoom_k
+	if hud == null:
+		return
+	var V := get_viewport().get_visible_rect().size
+	var shift := V.y * 0.5 - hud.reticle_center().y
+	if absf(shift) > 1.0:
+		var half := V.x * 0.5 if portrait else V.y * 0.5
+		var f := half / tan(deg_to_rad(cam.fov) * 0.5)
+		cam.rotate_object_local(Vector3.RIGHT, -atan(shift / f))
 
 
 func _march(from: Vector3, dir: Vector3) -> Vector3:
@@ -606,12 +653,54 @@ func _update_aim_point(screen_pos: Vector2) -> void:
 	aim_point = _march(cam.project_ray_origin(screen_pos), cam.project_ray_normal(screen_pos))
 
 
-func _designate_aim(screen_pos: Vector2) -> void:
-	touch_aim_world = _march(cam.project_ray_origin(screen_pos), cam.project_ray_normal(screen_pos))
-	touch_aiming = true
-	# A tap also fires, so touch play needs no separate aim step.
-	if not player.sunk:
-		(gunnery[player] as Gunnery).fire_at(touch_aim_world, Vector3.ZERO)
+## Touch aiming: the point under the fixed reticle. A hostile ship the reticle lies over (give or take a
+## fingertip of slop) gives its own range, so the swing only has to be accurate in bearing.
+func _reticle_aim() -> Vector3:
+	var rc := hud.reticle_center()
+	var o := cam.project_ray_origin(rc)
+	var d := cam.project_ray_normal(rc)
+	var best := Vector3.ZERO
+	var best_score := 1.0
+	for e in sensors.contacts_live(true):
+		var sh := e as Ship
+		if sh == null or sh.sunk or sh.team == player.team:
+			continue
+		var fwd := Vector3(sin(sh.heading), 0.0, cos(sh.heading))
+		var half := sh.wlen() * 0.5
+		var c0 := Vector3(sh.global_position.x, 8.0, sh.global_position.z)
+		# Closest approach of the ray to the hull's centre line (a segment), by sampling it.
+		for i in 9:
+			var q := c0 + fwd * (half * (float(i) / 4.0 - 1.0))
+			var t := maxf((q - o).dot(d), 0.0)
+			var dist := (o + d * t).distance_to(q)
+			var tol := maxf(sh.beam_m * 1.2, 14.0) + t * 0.012 * (0.4 + 0.6 * zoom_k)
+			if dist / tol < best_score:
+				best_score = dist / tol
+				best = Vector3(q.x, 6.0, q.z)
+	if best_score < 1.0:
+		return best
+	return _march(o, d)
+
+
+## A quick tap on a ship swings the aim camera onto it (bearing and range), without firing.
+func _tap_slew(screen_pos: Vector2) -> void:
+	if cam_mode != CamMode.AIM or player.sunk:
+		return
+	var best: Ship = null
+	var best_d := 110.0 * (hud._pk if hud != null else 1.0)
+	for e in sensors.contacts_live(true):
+		var sh := e as Ship
+		if sh == null or sh.sunk or cam.is_position_behind(sh.global_position):
+			continue
+		var d := cam.unproject_position(sh.global_position + Vector3(0, 10, 0)).distance_to(screen_pos)
+		if d < best_d:
+			best_d = d
+			best = sh
+	if best == null:
+		return
+	var to := best.global_position - cam.global_position
+	aim_yaw = atan2(to.x, to.z)
+	aim_pitch = clampf(atan2(6.0 - cam.global_position.y, Vector2(to.x, to.z).length()), -0.6, 0.3)
 
 
 # --- HUD ----------------------------------------------------------------------
@@ -631,6 +720,11 @@ func _build_hud() -> void:
 		hud.toggle_map()
 	hud.camera_pressed.connect(_cycle_camera)
 	hud.fire_changed.connect(func(held: bool) -> void: fire_held = held)
+	hud.scope_changed.connect(func(on: bool) -> void: zoom_target = SCOPE_K if on else 1.0)
+	if hud.touch or OS.get_cmdline_user_args().has("--touchui"):
+		reticle_aim = true
+		cam_mode = CamMode.AIM
+		aim_yaw = player.heading
 
 
 func _update_hud() -> void:
@@ -642,4 +736,4 @@ func _update_hud() -> void:
 		if d < best:
 			best = d
 			nearest = e
-	hud.update_hud(aim_point, CAM_NAMES[cam_mode], live.size(), nearest, not touch_aiming)
+	hud.update_hud(aim_point, CAM_NAMES[cam_mode], live.size(), nearest, not reticle_aim)

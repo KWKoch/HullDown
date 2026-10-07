@@ -7,6 +7,7 @@ extends CanvasLayer
 
 signal camera_pressed
 signal fire_changed(held: bool)
+signal scope_changed(on: bool)
 
 const C_NAV := Color(0.30, 0.82, 0.86)
 const C_ENG := Color(1.00, 0.72, 0.22)
@@ -55,6 +56,26 @@ var _flood_state: Dictionary = {}
 var _t := 0.0
 var _last_aim := Vector3.ZERO
 
+## Layout mode. Portrait phones get a tall control deck under the view; touch devices get larger
+## gauges and buttons, and a fixed centre reticle that the player swings by dragging.
+var portrait := false
+var touch := false
+var scope_on := false
+var _fk := 1.0                        ## font scale
+var _pk := 1.0                        ## nameplate / reticle scale
+var _compass_sc := 1.0
+var _reticle_c := Vector2(960, 540)
+var _mouse_aiming := true
+var _strip: PanelContainer
+var _prop_tag: Control
+var _steer_tag: Control
+var _scope_button: Button
+var _map_button: Button
+var _zin: Button
+var _zout: Button
+var _covered: Array[Rect2] = []
+var _ptr: Dictionary = {}             ## pointer index -> Control it is holding
+
 
 func setup(p_ship: Ship, p_gun: Gunnery, p_controls: PlayerControls, p_terrain: Node, p_ground: String, p_opponents: int) -> void:
 	ship = p_ship
@@ -64,11 +85,58 @@ func setup(p_ship: Ship, p_gun: Gunnery, p_controls: PlayerControls, p_terrain: 
 	ground_name = p_ground
 	opponents_total = p_opponents
 	layer = 10
+	_decide_mode()
 	_build()
+	get_viewport().size_changed.connect(_on_size_changed)
 	ship.compartment_destroyed.connect(_on_destroyed)
 	ship.magazine_detonated.connect(func(_s: Ship, c: Compartment) -> void: _event("MAGAZINE DETONATED: " + c.id, C_BAD))
 	ship.ship_sunk.connect(func(_s: Ship) -> void: _event("SHIP LOST", C_BAD))
 	_event("General Quarters. Ship cleared for action.", C_DIM)
+
+
+# --- Layout mode ----------------------------------------------------------------------
+
+func _decide_mode() -> void:
+	var win := get_window()
+	var ws := Vector2(win.size)
+	touch = DisplayServer.is_touchscreen_available() or OS.get_cmdline_user_args().has("--touchui")
+	portrait = ws.y > ws.x * 1.05
+	win.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_EXPAND
+	win.content_scale_size = Vector2i(1080, 1920) if portrait else Vector2i(1920, 1080)
+	_fk = 1.6 if portrait else (1.25 if touch else 1.0)
+	_pk = 1.5 if portrait else (1.2 if touch else 1.0)
+	_compass_sc = 1.5 if portrait else 1.0
+
+
+func _exit_tree() -> void:
+	var win := get_window()
+	if win != null:
+		win.content_scale_size = Vector2i(1920, 1080)
+		win.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_KEEP
+
+
+func _on_size_changed() -> void:
+	var ws := Vector2(get_window().size)
+	if (ws.y > ws.x * 1.05) != portrait:
+		_rebuild.call_deferred()
+	else:
+		_layout.call_deferred()
+
+
+func _rebuild() -> void:
+	_decide_mode()
+	for c in get_children():
+		remove_child(c)
+		c.queue_free()
+	_ui_controls.clear()
+	_values.clear()
+	_ptr.clear()
+	_build()
+
+
+## Where the aim reticle sits on screen (canvas coordinates): the middle of the clear part of the view.
+func reticle_center() -> Vector2:
+	return _reticle_c
 
 
 # --- Construction ---------------------------------------------------------------------
@@ -92,7 +160,7 @@ func _style(accent: Color) -> StyleBoxFlat:
 func _label(text: String, size: int, color: Color) -> Label:
 	var l := Label.new()
 	l.text = text
-	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_font_size_override("font_size", roundi(size * _fk))
 	l.add_theme_color_override("font_color", color)
 	l.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -165,6 +233,7 @@ func _build() -> void:
 	add_child(_reticle)
 	# Navigation strip, centred under the compass: speed, heading, rudder, water under the keel.
 	var strip := PanelContainer.new()
+	_strip = strip
 	strip.add_theme_stylebox_override("panel", _style(C_NAV))
 	strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(strip)
@@ -195,11 +264,12 @@ func _build() -> void:
 	# Damage readouts above the engine telegraph and the helm.
 	_values["prop"] = _gauge_tag(Vector2(960.0 - 170.0, 1080.0 - 12.0 - 190.0 - 34.0), 100.0, "PROP")
 	_values["steer"] = _gauge_tag(Vector2(960.0 - 170.0 + 110.0, 1080.0 - 12.0 - 68.0 - 34.0), 230.0, "STEER")
+	_prop_tag = (_values["prop"] as Label).get_parent().get_parent() as Control
+	_steer_tag = (_values["steer"] as Label).get_parent().get_parent() as Control
 
 	# Own-ship condition: broadside profile, repair-party hats and two lines of figures (top right).
 	_profile = ShipProfile.new()
 	_profile.ship = ship
-	_profile.position = Vector2(1920.0 - 14.0 - ShipProfile.W - (202.0 if (DisplayServer.is_touchscreen_available() or OS.get_cmdline_user_args().has("--touchui")) else 0.0), 1080.0 - 12.0 - ShipProfile.H)
 	_profile.clicked.connect(func() -> void: ship.dc.cycle_priority())
 	add_child(_profile)
 	_ui_controls.append(_profile)
@@ -227,6 +297,7 @@ func _build() -> void:
 
 	_build_controls()
 	_build_maps()
+	_layout()
 
 
 func _build_maps() -> void:
@@ -241,10 +312,10 @@ func _build_maps() -> void:
 	_mini.clicked.connect(toggle_map)
 	_mini.wheel.connect(func(d: int) -> void: _zoom_mini(-d))
 	_ui_controls.append(_mini)
-	var zin := _btn("+", Vector2(30, 30), Vector2(14 + 290 - 34, 1080.0 - 14.0 - 290.0 + 4), C_NAV)
-	zin.pressed.connect(func() -> void: _zoom_mini(-1))
-	var zout := _btn("-", Vector2(30, 30), Vector2(14 + 290 - 68, 1080.0 - 14.0 - 290.0 + 4), C_NAV)
-	zout.pressed.connect(func() -> void: _zoom_mini(1))
+	_zin = _btn("+", Vector2(30, 30), Vector2(14 + 290 - 34, 1080.0 - 14.0 - 290.0 + 4), C_NAV)
+	_zin.pressed.connect(func() -> void: _zoom_mini(-1))
+	_zout = _btn("-", Vector2(30, 30), Vector2(14 + 290 - 68, 1080.0 - 14.0 - 290.0 + 4), C_NAV)
+	_zout.pressed.connect(func() -> void: _zoom_mini(1))
 	_big = MapView.new()
 	_big.size = Vector2(830, 830)
 	_big.position = Vector2(960.0 - 415.0, 36)
@@ -280,7 +351,8 @@ func _btn(text: String, size: Vector2, pos: Vector2, color: Color) -> Button:
 	b.size = size
 	b.position = pos
 	b.focus_mode = Control.FOCUS_NONE
-	b.add_theme_font_size_override("font_size", 16)
+	b.add_theme_font_size_override("font_size", roundi(16 * _fk))
+	b.mouse_filter = Control.MOUSE_FILTER_IGNORE        # pointers are routed by _input so several fingers work at once
 	b.add_theme_color_override("font_color", C_TEXT)
 	_set_btn_colors(b, color, false)
 	add_child(b)
@@ -331,23 +403,211 @@ func _build_controls() -> void:
 	_ui_controls.append(_helm)
 	# Fire button: touch screens only (on a PC the left mouse button fires). Camera sits above it on
 	# touch, and drops to the corner on PC.
-	var touch := DisplayServer.is_touchscreen_available() or OS.get_cmdline_user_args().has("--touchui")
 	_fire_button = _btn("FIRE\nMAIN BATTERY", Vector2(190, 120), Vector2(1920.0 - 14.0 - 190.0, 1080.0 - 14.0 - 120.0), C_WEP)
 	if not touch:
 		_fire_button.visible = false
-	_fire_button.add_theme_font_size_override("font_size", 20)
+	_fire_button.add_theme_font_size_override("font_size", roundi(20 * (1.5 if portrait else 1.0) * (1.0 if portrait else _fk)))
 	_fire_button.button_down.connect(func() -> void: fire_changed.emit(true))
 	_fire_button.button_up.connect(func() -> void: fire_changed.emit(false))
 	_cam_button = _btn("CAMERA: CHASE  [C]", Vector2(190, 50), Vector2(1920.0 - 14.0 - 190.0, 14.0), C_NAV)
 	_cam_button.pressed.connect(func() -> void: camera_pressed.emit())
+	_scope_button = _btn("SCOPE", Vector2(190, 50), Vector2(0, 0), C_NAV)
+	_scope_button.visible = touch
+	_scope_button.pressed.connect(func() -> void:
+		scope_on = not scope_on
+		_set_btn_colors(_scope_button, C_NAV, scope_on)
+		scope_changed.emit(scope_on))
+	_scope_button.add_theme_font_size_override("font_size", roundi(18 * _fk))
+	_set_btn_colors(_scope_button, C_NAV, scope_on)
+	_map_button = _btn("MAP", Vector2(190, 50), Vector2(0, 0), C_NAV)
+	_map_button.visible = portrait
+	_map_button.pressed.connect(toggle_map)
 
 
 ## True when a screen position (in canvas coordinates) is over an on-screen control.
 func is_over_ui(canvas_pos: Vector2) -> bool:
 	for c in _ui_controls:
-		if c.is_visible_in_tree() and c.get_global_rect().has_point(canvas_pos):
+		if c.is_visible_in_tree() and Rect2(c.global_position, c.size * c.scale).has_point(canvas_pos):
 			return true
 	return false
+
+
+func _place(c: Control, pos: Vector2, sz: Vector2) -> void:
+	c.position = pos
+	c.custom_minimum_size = sz
+	c.size = sz
+
+
+## Positions everything from the viewport size. Portrait: the 3D view on top, a control deck under it
+## (mode buttons, big telegraph, FIRE and ship status, then a wide helm). Landscape: gauges centred
+## along the bottom edge as before, enlarged on touch screens.
+func _layout() -> void:
+	if _telegraph == null or not is_inside_tree():
+		return
+	var V := get_viewport().get_visible_rect().size
+	var W := V.x
+	var H := V.y
+	var pad := 16.0
+	_covered.clear()
+	_profile.scale = Vector2.ONE
+	if portrait:
+		var btn_h := 104.0
+		var tel_w := 250.0
+		var tel_h := 470.0
+		var hel_h := 200.0
+		var deck_h := pad * 4.0 + btn_h + tel_h + hel_h
+		var yd := H - deck_h
+		var bw := (W - pad * 4.0) / 3.0
+		_place(_cam_button, Vector2(pad, yd + pad), Vector2(bw, btn_h))
+		_place(_scope_button, Vector2(pad * 2.0 + bw, yd + pad), Vector2(bw, btn_h))
+		_place(_map_button, Vector2(pad * 3.0 + bw * 2.0, yd + pad), Vector2(bw, btn_h))
+		_scope_button.visible = true
+		var yt := yd + pad * 2.0 + btn_h
+		_telegraph.k = minf(tel_w / 100.0, tel_h / 190.0)
+		_place(_telegraph, Vector2(pad, yt), Vector2(tel_w, tel_h))
+		var fire_w := W - pad * 3.0 - tel_w
+		var ps := minf(1.4, fire_w / ShipProfile.W)
+		var prof_h := ShipProfile.H * ps
+		var fire_h := tel_h - prof_h - pad
+		var xf := pad * 2.0 + tel_w
+		_place(_fire_button, Vector2(xf, yt), Vector2(fire_w, fire_h))
+		_profile.scale = Vector2(ps, ps)
+		_profile.position = Vector2(xf + (fire_w - ShipProfile.W * ps) * 0.5, yt + fire_h + pad)
+		var yh := yt + tel_h + pad
+		_helm.k = minf((W - pad * 2.0) / 230.0, hel_h / 68.0)
+		_place(_helm, Vector2(pad, yh), Vector2(W - pad * 2.0, hel_h))
+		_prop_tag.position = Vector2(pad, yd - 54.0)
+		_prop_tag.custom_minimum_size = Vector2(360, 0)
+		_steer_tag.position = Vector2(W - pad - 360.0, yd - 54.0)
+		_steer_tag.custom_minimum_size = Vector2(360, 0)
+		_compass.size = Vector2(W - pad * 2.0, 44.0 * _compass_sc)
+		_compass.custom_minimum_size = _compass.size
+		_compass.position = Vector2(pad, 12)
+		_strip.position = Vector2(pad, 12.0 + 44.0 * _compass_sc + 8.0)
+		_strip.custom_minimum_size = Vector2(W - pad * 2.0, 0)
+		_strip.size = Vector2(W - pad * 2.0, 0)
+		var ydyn := _strip.position.y + 96.0
+		_values["dyn"].position = Vector2(pad, ydyn)
+		_values["dyn"].custom_minimum_size = Vector2(W - pad * 2.0, 0)
+		var ymap := ydyn + 40.0
+		_mini.size = Vector2(300, 300)
+		_mini.position = Vector2(pad, ymap)
+		_place(_zin, Vector2(pad + 300.0 - 70.0, ymap + 6.0), Vector2(64, 64))
+		_place(_zout, Vector2(pad + 300.0 - 140.0, ymap + 6.0), Vector2(64, 64))
+		_alert_box.position = Vector2(pad * 2.0 + 300.0, ymap)
+		_alert_box.custom_minimum_size = Vector2(W - 300.0 - pad * 3.0, 0)
+		_log_box.position = Vector2(pad, yd - 54.0 - 215.0)
+		_log_box.custom_minimum_size = Vector2(W - pad * 2.0, 0)
+		_big.size = Vector2(W - pad * 2.0, W - pad * 2.0)
+		_big.position = Vector2(pad, 130)
+		_reticle_c = Vector2(W * 0.5, (ymap + yd - 60.0) * 0.5)
+		_covered = [Rect2(0, 0, W, ymap), Rect2(0, yd - 60.0, W, deck_h + 60.0), Rect2(pad, ymap, 300, 300)]
+	else:
+		var tk := 1.4 if touch else 1.0
+		var tel_x := W * 0.5 - (100.0 + 10.0 + 230.0) * tk * 0.5
+		_telegraph.k = tk
+		_place(_telegraph, Vector2(tel_x, H - 12.0 - 190.0 * tk), Vector2(100.0 * tk, 190.0 * tk))
+		_helm.k = tk
+		_place(_helm, Vector2(tel_x + 110.0 * tk, H - 12.0 - 68.0 * tk), Vector2(230.0 * tk, 68.0 * tk))
+		_prop_tag.position = Vector2(tel_x, H - 12.0 - 190.0 * tk - 34.0)
+		_prop_tag.custom_minimum_size = Vector2(100.0 * tk, 0)
+		_steer_tag.position = Vector2(tel_x + 110.0 * tk, H - 12.0 - 68.0 * tk - 34.0)
+		_steer_tag.custom_minimum_size = Vector2(230.0 * tk, 0)
+		var fs := 1.3 if touch else 1.0
+		var fw := 190.0 * fs
+		var fh := 120.0 * fs
+		_place(_fire_button, Vector2(W - 14.0 - fw, H - 14.0 - fh), Vector2(fw, fh))
+		_place(_cam_button, Vector2(W - 14.0 - 190.0, 14), Vector2(190, 50))
+		_place(_scope_button, Vector2(W - 14.0 - 190.0, 72), Vector2(190, 50))
+		_scope_button.visible = touch
+		_map_button.visible = false
+		_profile.position = Vector2(W - 14.0 - ShipProfile.W - (fw + 12.0 if touch else 0.0), H - 12.0 - ShipProfile.H)
+		_compass.size = Vector2(520, 44)
+		_compass.custom_minimum_size = _compass.size
+		_compass.position = Vector2(W * 0.5 - 260.0, 12)
+		_strip.position = Vector2(W * 0.5 - 360.0, 62)
+		_strip.custom_minimum_size = Vector2(720, 0)
+		_values["dyn"].position = Vector2(W * 0.5 - 360.0, 62 + 52)
+		_values["dyn"].custom_minimum_size = Vector2(720, 0)
+		var zs := 44.0 if touch else 30.0
+		_mini.size = Vector2(290, 290)
+		_mini.position = Vector2(14, H - 14.0 - 290.0)
+		_place(_zin, Vector2(14 + 290 - zs - 4.0, H - 14.0 - 290.0 + 4.0), Vector2(zs, zs))
+		_place(_zout, Vector2(14 + 290 - zs * 2.0 - 8.0, H - 14.0 - 290.0 + 4.0), Vector2(zs, zs))
+		_alert_box.position = Vector2(W * 0.5 - 230.0, 140)
+		_alert_box.custom_minimum_size = Vector2(460, 0)
+		_log_box.position = Vector2(320.0, H - 170.0)
+		_log_box.custom_minimum_size = Vector2(440, 0)
+		_big.size = Vector2(830, 830)
+		_big.position = Vector2(W * 0.5 - 415.0, 36)
+		_reticle_c = V * 0.5
+		_covered = [Rect2(W * 0.5 - 260.0, 0, 520, 120), Rect2(W - 230.0, 0, 230, 125), Rect2(tel_x - 10.0, H - 280.0, 360.0 * tk, 280.0),
+			Rect2(0, H - 320.0, 320, 320), Rect2(W - 400.0 - (fw if touch else 0.0), H - 190.0, 400.0 + (fw if touch else 0.0), 190.0)]
+
+
+# --- Pointer routing --------------------------------------------------------------------
+# Buttons and gauges are driven from raw touches, not GUI mouse events, because Godot only
+# emulates a mouse from the first finger: with one thumb on FIRE a second finger could not steer.
+
+func _target_at(pos: Vector2) -> Control:
+	for i in range(_ui_controls.size() - 1, -1, -1):
+		var c := _ui_controls[i]
+		if c.is_visible_in_tree() and Rect2(c.global_position, c.size * c.scale).has_point(pos):
+			return c if (c is Button or c is DetentGauge) else null
+	return null
+
+
+func _input(event: InputEvent) -> void:
+	var idx := -999
+	var pos := Vector2.ZERO
+	var kind := ""
+	if event is InputEventScreenTouch:
+		var st := event as InputEventScreenTouch
+		idx = st.index
+		pos = st.position
+		kind = "down" if st.pressed else "up"
+	elif event is InputEventScreenDrag:
+		var sd := event as InputEventScreenDrag
+		idx = sd.index
+		pos = sd.position
+		kind = "move"
+	elif event is InputEventMouseButton and event.device != InputEvent.DEVICE_ID_EMULATION and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+		var mb := event as InputEventMouseButton
+		idx = -100
+		pos = mb.position
+		kind = "down" if mb.pressed else "up"
+	elif event is InputEventMouseMotion and event.device != InputEvent.DEVICE_ID_EMULATION and _ptr.has(-100):
+		idx = -100
+		pos = (event as InputEventMouseMotion).position
+		kind = "move"
+	else:
+		return
+	match kind:
+		"down":
+			var t := _target_at(pos)
+			if t == null:
+				return
+			_ptr[idx] = t
+			get_viewport().set_input_as_handled()
+			if t is DetentGauge:
+				(t as DetentGauge).pick_at(pos)
+			elif t == _fire_button:
+				_set_btn_colors(_fire_button, C_WEP, true)
+				fire_changed.emit(true)
+			else:
+				(t as Button).pressed.emit()
+		"move":
+			if _ptr.has(idx):
+				get_viewport().set_input_as_handled()
+				if _ptr[idx] is DetentGauge:
+					(_ptr[idx] as DetentGauge).pick_at(pos)
+		"up":
+			if _ptr.has(idx):
+				get_viewport().set_input_as_handled()
+				if _ptr[idx] == _fire_button:
+					_set_btn_colors(_fire_button, C_WEP, false)
+					fire_changed.emit(false)
+				_ptr.erase(idx)
 
 
 # --- Per-frame update ------------------------------------------------------------------
@@ -380,7 +640,9 @@ func _on_destroyed(_s: Ship, c: Compartment) -> void:
 func update_hud(aim_point: Vector3, mode_name: String, enemies: int, nearest: Ship, mouse_aiming: bool) -> void:
 	_t += get_process_delta_time()
 	camera_mode_name = mode_name
-	_cam_button.text = "CAMERA: %s  [C]" % mode_name
+	_mouse_aiming = mouse_aiming
+	_cam_button.text = ("CAMERA\n%s" % mode_name) if portrait else "CAMERA: %s  [C]" % mode_name
+	_scope_button.text = "SCOPE ON" if scope_on else "SCOPE"
 	_update_nav()
 	_update_eng()
 	_update_weapons(aim_point, enemies, nearest)
@@ -551,6 +813,8 @@ func _update_alerts() -> void:
 		pc.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		var l := _label(a[0], 20, Color(col.r, col.g, col.b, pulse if col == C_BAD else 1.0))
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		l.custom_minimum_size = Vector2(maxf(_alert_box.custom_minimum_size.x - 24.0, 200.0), 0)
 		pc.add_child(l)
 		_alert_box.add_child(pc)
 
@@ -573,14 +837,17 @@ func _update_log() -> void:
 # --- Custom drawing ---------------------------------------------------------------------
 
 func _draw_compass() -> void:
-	var w := 520.0
+	var sc := _compass_sc
+	var w := _compass.size.x / sc
 	var h := 44.0
+	_compass.draw_set_transform(Vector2.ZERO, 0.0, Vector2(sc, sc))
 	var hdg := bearing_deg(ship.heading)
 	_compass.draw_rect(Rect2(0, 0, w, h), C_PANEL)
 	_compass.draw_rect(Rect2(0, 0, w, 3), C_NAV)
 	var font := ThemeDB.fallback_font
 	var px_per_deg := 4.0
-	for d in range(-65, 66):
+	var span := int(w / 8.0) + 2
+	for d in range(-span, span + 1):
 		var deg := int(roundf(hdg)) + d
 		var x := w * 0.5 + (float(deg) - hdg) * px_per_deg
 		if x < 4.0 or x > w - 4.0:
@@ -604,6 +871,12 @@ func _health_color(c: Compartment) -> Color:
 
 
 func _draw_reticle() -> void:
+	if not _mouse_aiming and ship != null:
+		# Touch aiming: the view is the sight. A faint ring marks where the swing is pointing.
+		var rc := _reticle_c
+		_reticle.draw_arc(rc, 34.0 * _pk, 0.0, TAU, 56, Color(1, 1, 1, 0.30), 2.0, true)
+		for d in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
+			_reticle.draw_line(rc + d * 34.0 * _pk, rc + d * 48.0 * _pk, Color(1, 1, 1, 0.30), 2.0)
 	if camera == null or ship == null or ship.sunk or camera.is_position_behind(_last_aim):
 		return
 	var p := camera.unproject_position(_last_aim)
@@ -614,11 +887,13 @@ func _draw_reticle() -> void:
 	var r := 18.0
 	_draw_splash_ellipse(p, c)
 	var font := ThemeDB.fallback_font
+	_reticle.draw_set_transform(p * (1.0 - _pk), 0.0, Vector2(_pk, _pk))
 	_draw_battery_lamps(p, r)
 	var ts := font.get_string_size(_aim_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14)
 	var tp := p + Vector2(-ts.x * 0.5, r + 28.0)
 	_reticle.draw_string(font, tp + Vector2(1, 1), _aim_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0, 0, 0, 0.9))
 	_reticle.draw_string(font, tp, _aim_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, c)
+	_reticle.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 ## The scatter ellipse seen from the camera: the same shape the AimMarker lays on the water, projected
@@ -716,11 +991,12 @@ func _draw_plates() -> void:
 		if p.x < -60 or p.y < -40 or p.x > vp.x + 60 or p.y > vp.y + 40:
 			continue
 		var covered := false
-		for r in [Rect2(700, 0, 520, 120), Rect2(1690, 0, 230, 80), Rect2(780, 820, 380, 260), Rect2(0, 760, 320, 320), Rect2(1560, 900, 360, 180)]:
-			if (r as Rect2).has_point(p):
+		for r in _covered:
+			if r.has_point(p):
 				covered = true
 		if covered or (_big != null and _big.visible):
 			continue
+		_plates.draw_set_transform(p * (1.0 - _pk), 0.0, Vector2(_pk, _pk))
 		var col := C_GOOD if friend else C_BAD
 		if s == ship:
 			col = C_NAV
@@ -751,3 +1027,4 @@ func _draw_plates() -> void:
 		for st in chips:
 			StatusIcons.draw(_plates, Vector2(cx, top.y + 28.0), 17.0, st, _plate_t)
 			cx += 20.0
+	_plates.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)

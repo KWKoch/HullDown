@@ -22,6 +22,7 @@ var _vis := 0.0             ## animated lever position (fractional index)
 var _drag := false
 var _t := 0.0
 var _bezel: StyleBoxFlat
+var k := 1.0                ## drawing scale: the gauge lays itself out in size/k units, so touch layouts can enlarge it
 
 
 func setup(p_title: String, p_vertical: bool, p_labels: Array[String], p_colors: Array[Color], start: int) -> void:
@@ -46,9 +47,10 @@ func _n() -> int:
 
 func _track() -> Array[float]:
 	## [start, end] coordinates of the first and last detent along the long axis.
+	var ls := size / k
 	if vertical:
-		return [28.0, size.y - 12.0]
-	return [26.0, size.x - 26.0]
+		return [28.0, ls.y - 12.0]
+	return [26.0, ls.x - 26.0]
 
 
 func _coord(idx: float) -> float:
@@ -57,6 +59,9 @@ func _coord(idx: float) -> float:
 
 
 func _gui_input(e: InputEvent) -> void:
+	if e is InputEventMouseButton or e is InputEventMouseMotion:
+		e = e.duplicate()
+		e.position = e.position / k
 	if e is InputEventMouseButton and (e as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
 		_drag = (e as InputEventMouseButton).pressed
 		if _drag:
@@ -65,6 +70,11 @@ func _gui_input(e: InputEvent) -> void:
 	elif e is InputEventMouseMotion and _drag:
 		_pick((e as InputEventMouseMotion).position)
 		accept_event()
+
+
+## Pick the detent under a canvas-space position (used by the HUD's multi-touch router).
+func pick_at(canvas_pos: Vector2) -> void:
+	_pick((canvas_pos - global_position) / k)
 
 
 func _pick(p: Vector2) -> void:
@@ -85,11 +95,13 @@ func _draw() -> void:
 	if _bezel == null:
 		return
 	var font := ThemeDB.fallback_font
-	draw_style_box(_bezel, Rect2(Vector2.ZERO, size))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2(k, k))
+	var ls := self.size / k
+	draw_style_box(_bezel, Rect2(Vector2.ZERO, ls))
 	draw_string(font, Vector2(10, 17), title, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, BRASS_LIGHT)
 	var n := _n()
 	if vertical:
-		var tx := size.x - 26.0
+		var tx := ls.x - 26.0
 		# Slot the lever rides in.
 		draw_rect(Rect2(tx - 3, _coord(0), 6, _coord(n - 1) - _coord(0)), Color(0.0, 0.0, 0.0, 0.7))
 		draw_rect(Rect2(tx - 1, _coord(0), 2, _coord(n - 1) - _coord(0)), BRASS)
