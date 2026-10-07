@@ -1,9 +1,9 @@
-; Engine configuration file for Hull Down (Godot 4.x)
+; Engine configuration file for Broadside (working title; formerly Hull Down) (Godot 4.x)
 config_version=5
 
 [application]
 config/icon="res://icons/icon_512.png"
-config/name="Hull Down"
+config/name="Broadside"
 config/description="WWII naval combat. Squatch Squad Studios."
 run/main_scene="res://scenes/main_menu.tscn"
 config/features=PackedStringArray("4.3", "Forward Plus")

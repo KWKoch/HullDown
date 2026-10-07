@@ -1,5 +1,5 @@
 extends CanvasLayer
-## Autoload "MobileMode": Hull Down is landscape-only. On a phone it goes fullscreen on the first
+## Autoload "MobileMode": Broadside is landscape-only. On a phone it goes fullscreen on the first
 ## touch (and asks the browser to lock landscape), and a "rotate your phone" card covers the game,
 ## pausing it, while the device is held upright.
 
@@ -34,7 +34,7 @@ func _ready() -> void:
 	_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(_overlay)
 	var l := Label.new()
-	l.text = "ROTATE YOUR PHONE\n\nHull Down is played in landscape"
+	l.text = "ROTATE YOUR PHONE\n\nBroadside is played in landscape"
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	l.set_anchors_preset(Control.PRESET_FULL_RECT)
