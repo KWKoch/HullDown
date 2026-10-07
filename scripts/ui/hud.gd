@@ -73,6 +73,10 @@ var _scope_button: Button
 var _map_button: Button
 var _zin: Button
 var _zout: Button
+var _eng_up: Button
+var _eng_dn: Button
+var _helm_l: Button
+var _helm_r: Button
 var _covered: Array[Rect2] = []
 var _ptr: Dictionary = {}             ## pointer index -> Control it is holding
 
@@ -419,6 +423,17 @@ func _build_controls() -> void:
 		scope_changed.emit(scope_on))
 	_scope_button.add_theme_font_size_override("font_size", roundi(18 * _fk))
 	_set_btn_colors(_scope_button, C_NAV, scope_on)
+	_eng_up = _btn("▲\nFASTER", Vector2(100, 100), Vector2.ZERO, C_GOOD)
+	_eng_up.pressed.connect(func() -> void: controls.step_engine(1))
+	_eng_dn = _btn("▼\nSLOWER", Vector2(100, 100), Vector2.ZERO, C_BAD)
+	_eng_dn.pressed.connect(func() -> void: controls.step_engine(-1))
+	_helm_l = _btn("◄\nPORT", Vector2(100, 100), Vector2.ZERO, C_BAD)
+	_helm_l.pressed.connect(func() -> void: controls.step_helm(1))
+	_helm_r = _btn("►\nSTBD", Vector2(100, 100), Vector2.ZERO, C_GOOD)
+	_helm_r.pressed.connect(func() -> void: controls.step_helm(-1))
+	for b in [_eng_up, _eng_dn, _helm_l, _helm_r]:
+		(b as Button).visible = touch or portrait
+		(b as Button).add_theme_font_size_override("font_size", roundi(20 * _fk))
 	_map_button = _btn("MAP", Vector2(190, 50), Vector2(0, 0), C_NAV)
 	_map_button.visible = portrait
 	_map_button.pressed.connect(toggle_map)
@@ -465,17 +480,24 @@ func _layout() -> void:
 		var yt := yd + pad * 2.0 + btn_h
 		_telegraph.k = minf(tel_w / 100.0, tel_h / 190.0)
 		_place(_telegraph, Vector2(pad, yt), Vector2(tel_w, tel_h))
-		var fire_w := W - pad * 3.0 - tel_w
+		var sb_w := 130.0
+		_place(_eng_up, Vector2(pad * 2.0 + tel_w, yt), Vector2(sb_w, (tel_h - pad) * 0.5))
+		_place(_eng_dn, Vector2(pad * 2.0 + tel_w, yt + (tel_h + pad) * 0.5), Vector2(sb_w, (tel_h - pad) * 0.5))
+		var fire_w := W - pad * 4.0 - tel_w - sb_w
 		var ps := minf(1.4, fire_w / ShipProfile.W)
 		var prof_h := ShipProfile.H * ps
 		var fire_h := tel_h - prof_h - pad
-		var xf := pad * 2.0 + tel_w
+		var xf := pad * 3.0 + tel_w + sb_w
 		_place(_fire_button, Vector2(xf, yt), Vector2(fire_w, fire_h))
 		_profile.scale = Vector2(ps, ps)
 		_profile.position = Vector2(xf + (fire_w - ShipProfile.W * ps) * 0.5, yt + fire_h + pad)
 		var yh := yt + tel_h + pad
-		_helm.k = minf((W - pad * 2.0) / 230.0, hel_h / 68.0)
-		_place(_helm, Vector2(pad, yh), Vector2(W - pad * 2.0, hel_h))
+		var hb_w := 170.0
+		var hg_w := W - pad * 4.0 - hb_w * 2.0
+		_place(_helm_l, Vector2(pad, yh), Vector2(hb_w, hel_h))
+		_place(_helm_r, Vector2(W - pad - hb_w, yh), Vector2(hb_w, hel_h))
+		_helm.k = minf(hg_w / 230.0, hel_h / 68.0)
+		_place(_helm, Vector2(pad * 2.0 + hb_w, yh), Vector2(hg_w, hel_h))
 		_prop_tag.position = Vector2(pad, yd - 54.0)
 		_prop_tag.custom_minimum_size = Vector2(360, 0)
 		_steer_tag.position = Vector2(W - pad - 360.0, yd - 54.0)
@@ -513,6 +535,11 @@ func _layout() -> void:
 		_prop_tag.custom_minimum_size = Vector2(100.0 * tk, 0)
 		_steer_tag.position = Vector2(tel_x + 110.0 * tk, H - 12.0 - 68.0 * tk - 34.0)
 		_steer_tag.custom_minimum_size = Vector2(230.0 * tk, 0)
+		var sbw := 74.0
+		_place(_eng_up, Vector2(tel_x - sbw - 8.0, H - 12.0 - 190.0 * tk), Vector2(sbw, 92.0 * tk))
+		_place(_eng_dn, Vector2(tel_x - sbw - 8.0, H - 12.0 - 190.0 * tk + 98.0 * tk), Vector2(sbw, 92.0 * tk))
+		_place(_helm_l, Vector2(tel_x + 340.0 * tk + 8.0, H - 12.0 - 68.0 * tk), Vector2(sbw, 68.0 * tk))
+		_place(_helm_r, Vector2(tel_x + 340.0 * tk + 16.0 + sbw, H - 12.0 - 68.0 * tk), Vector2(sbw, 68.0 * tk))
 		var fs := 1.3 if touch else 1.0
 		var fw := 190.0 * fs
 		var fh := 120.0 * fs
