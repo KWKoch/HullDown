@@ -4,12 +4,13 @@ config_version=5
 [application]
 config/name="Hull Down"
 config/description="WWII naval combat. Squatch Squad Studios."
-run/main_scene="res://scenes/testbed.tscn"
+run/main_scene="res://scenes/main_menu.tscn"
 config/features=PackedStringArray("4.3", "Forward Plus")
 
 [autoload]
 Roster="*res://scripts/data/roster.gd"
 Battlegrounds="*res://scripts/data/battlegrounds.gd"
+GameSession="*res://scripts/game/game_session.gd"
 
 [display]
 window/size/viewport_width=1920

@@ -122,3 +122,84 @@ func get_ground(id: String) -> Dictionary:
 		if g["id"] == id:
 			return g
 	return {}
+
+
+## Named places on each map, matched to the real geography the arena is modelled on.
+## kind: land | objective | start_a | start_b | hazard | channel
+## In-game compass: +Z is north, -X is east (the HUD bearing convention).
+const WAYPOINTS := {
+	"surigao_strait": [
+		{"n": "Dinagat Island", "p": Vector2(-6200, 0), "k": "land"},
+		{"n": "Leyte (Panaon coast)", "p": Vector2(6500, 800), "k": "land"},
+		{"n": "Hibuson Island", "p": Vector2(5200, -4800), "k": "land"},
+		{"n": "Oldendorf's Battle Line", "p": Vector2(0, 5800), "k": "start_a"},
+		{"n": "Nishimura's Southern Force", "p": Vector2(0, -5800), "k": "start_b"},
+		{"n": "Surigao Strait Channel", "p": Vector2(0, 0), "k": "channel"},
+		{"n": "Panaon Shoal", "p": Vector2(-2400, -3600), "k": "hazard"},
+		{"n": "Leyte Gulf Entrance Shoal", "p": Vector2(2800, 3400), "k": "hazard"},
+	],
+	"savo_island": [
+		{"n": "Savo Island", "p": Vector2(0, -1200), "k": "land"},
+		{"n": "Guadalcanal", "p": Vector2(6000, 4800), "k": "land"},
+		{"n": "Florida Island (Tulagi)", "p": Vector2(-5200, 5600), "k": "land"},
+		{"n": "Crutchley's Southern Picket", "p": Vector2(1800, 4400), "k": "start_a"},
+		{"n": "Mikawa's Striking Force", "p": Vector2(-1800, -6200), "k": "start_b"},
+		{"n": "Ironbottom Sound Deep", "p": Vector2(-500, -2000), "k": "channel"},
+		{"n": "Lunga Reef", "p": Vector2(4600, 2200), "k": "hazard"},
+		{"n": "Savo Shoal", "p": Vector2(2800, -3200), "k": "hazard"},
+	],
+	"river_plate": [
+		{"n": "Montevideo (Uruguayan coast)", "p": Vector2(0, 7000), "k": "land"},
+		{"n": "Commodore Harwood's Force G", "p": Vector2(-3800, -5200), "k": "start_a"},
+		{"n": "Admiral Graf Spee", "p": Vector2(2600, 3800), "k": "start_b"},
+		{"n": "English Bank", "p": Vector2(-3200, 1000), "k": "hazard"},
+		{"n": "Ortiz Bank", "p": Vector2(2800, -2400), "k": "hazard"},
+		{"n": "Rouen Bank", "p": Vector2(4400, 2600), "k": "hazard"},
+		{"n": "Archimedes Shoal", "p": Vector2(-1200, -4200), "k": "hazard"},
+		{"n": "Main Shipping Channel", "p": Vector2(-500, 0), "k": "channel"},
+	],
+	"narvik": [
+		{"n": "Ofotfjord South Wall", "p": Vector2(-5800, 0), "k": "land"},
+		{"n": "Ofotfjord North Wall", "p": Vector2(5800, 0), "k": "land"},
+		{"n": "Narvik (fjord head)", "p": Vector2(0, 7000), "k": "land"},
+		{"n": "Ofotfjord Islet", "p": Vector2(1500, 1200), "k": "land"},
+		{"n": "Warspite & Destroyer Flotilla", "p": Vector2(0, -6000), "k": "start_a"},
+		{"n": "German Destroyers at Anchor", "p": Vector2(0, 4400), "k": "start_b"},
+		{"n": "Narvik Harbour Shoal", "p": Vector2(900, 3300), "k": "hazard"},
+		{"n": "Ofotfjord Deep", "p": Vector2(0, -1000), "k": "channel"},
+	],
+	"sunda_strait": [
+		{"n": "Krakatoa", "p": Vector2(1200, -300), "k": "land"},
+		{"n": "Java (Banten coast)", "p": Vector2(-6400, -1000), "k": "land"},
+		{"n": "Sumatra (Lampung coast)", "p": Vector2(6400, 600), "k": "land"},
+		{"n": "Sebuku Island", "p": Vector2(3000, 3600), "k": "land"},
+		{"n": "Allied Cruiser Squadron", "p": Vector2(-1200, -5400), "k": "start_a"},
+		{"n": "Japanese Invasion Fleet", "p": Vector2(1000, 5600), "k": "start_b"},
+		{"n": "Sunda Strait Channel", "p": Vector2(-700, 0), "k": "channel"},
+		{"n": "Banten Shoal", "p": Vector2(-2200, 3200), "k": "hazard"},
+	],
+	"mers_el_kebir": [
+		{"n": "Djebel Murdjadjo (Oran massif)", "p": Vector2(0, 6800), "k": "land"},
+		{"n": "Fort de Santon Battery", "p": Vector2(-600, 4600), "k": "objective"},
+		{"n": "Cap Falcon", "p": Vector2(-3600, 5200), "k": "land"},
+		{"n": "Cap de l'Aiguille", "p": Vector2(3600, 5400), "k": "land"},
+		{"n": "Admiral Somerville's Force H", "p": Vector2(0, -6000), "k": "start_a"},
+		{"n": "French Fleet at the Mole", "p": Vector2(0, 4200), "k": "start_b"},
+		{"n": "Harbour Mouth Shoal", "p": Vector2(-1500, 3200), "k": "hazard"},
+		{"n": "Gulf of Oran Deep", "p": Vector2(0, -2000), "k": "channel"},
+	],
+	"normandy_omaha": [
+		{"n": "Omaha Beach Bluffs", "p": Vector2(0, 6800), "k": "land"},
+		{"n": "Pointe du Hoc", "p": Vector2(4400, 4600), "k": "objective"},
+		{"n": "Colleville-sur-Mer Exit", "p": Vector2(-3000, 4800), "k": "objective"},
+		{"n": "Bombardment Squadron (TF 124)", "p": Vector2(0, -5800), "k": "start_a"},
+		{"n": "German Coastal Flank", "p": Vector2(2200, 3800), "k": "start_b"},
+		{"n": "Calvados Reef", "p": Vector2(-3400, 2800), "k": "hazard"},
+		{"n": "Omaha Shallows", "p": Vector2(0, 4600), "k": "hazard"},
+		{"n": "Transport Area Channel", "p": Vector2(0, -3200), "k": "channel"},
+	],
+}
+
+
+func waypoints(id: String) -> Array:
+	return WAYPOINTS.get(id, [])

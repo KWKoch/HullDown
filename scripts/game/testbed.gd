@@ -48,10 +48,13 @@ var aim_point := Vector3.ZERO
 
 func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
-	if args.size() > 0:
+	if args.size() > 0 and not args[0].begins_with("--"):
 		ground_id = args[0]
 	_report_on = args.has("--report")
 	peace = not (args.has("--hot") or args.has("--report") or args.has("--auto"))
+	if GameSession.launched:
+		ground_id = GameSession.ground_id
+		peace = false                    # a battle launched from the menu is always live
 	Gunnery.ceasefire = peace
 	_build_world()
 	_spawn_fleet()
@@ -111,19 +114,36 @@ func _spawn_fleet() -> void:
 	var ground := Battlegrounds.get_ground(ground_id)
 	var pool_a: Array = ground["team_a_pool"]
 	var pool_b: Array = ground["team_b_pool"]
+	var spawn_a: Vector3 = ground["spawn_a"]
+	var spawn_b: Vector3 = ground["spawn_b"]
 	var player_id: String = pool_a[player_index % pool_a.size()]
+	if GameSession.launched and GameSession.ship_id != "":
+		player_id = GameSession.ship_id
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--ship="):
 			player_id = a.substr(7)
-	player = _spawn(player_id, 0, _find_water(ground["spawn_a"]), true)
+	# A ship from the ground's second faction fights on that side: swap the sides.
+	var pnat: String = Roster.get_entry(player_id).get("nation", "")
+	if pnat in ground["factions"]["team_b"] and not pnat in ground["factions"]["team_a"]:
+		var tp := pool_a
+		pool_a = pool_b
+		pool_b = tp
+		var ts := spawn_a
+		spawn_a = spawn_b
+		spawn_b = ts
+		ground = ground.duplicate()
+		ground["spawn_a"] = spawn_a
+		ground["spawn_b"] = spawn_b
+	var own_head := 0.0 if spawn_a.z <= spawn_b.z else PI
+	player = _spawn(player_id, 0, _find_water(spawn_a), true)
 
 	for i in OPPONENTS:
 		var cls: String = pool_b[i % pool_b.size()]
-		var anchor: Vector3 = ground["spawn_b"]
+		var anchor: Vector3 = spawn_b
 		var offset := Vector3((i % 6 - 2.5) * 650.0, 0, (i / 6 - 2) * 650.0)
 		var s := _spawn(cls, 1, _find_water(anchor + offset), false)
-		s.heading = PI
-	player.heading = 0.0
+		s.heading = own_head + PI
+	player.heading = own_head
 	if peace:
 		# Two practice targets close ahead: real ships with their magazines emptied and guns disarmed.
 		for k in 2:
@@ -135,7 +155,7 @@ func _spawn_fleet() -> void:
 			tgt.disarmed = true
 			for c in tgt.compartments:
 				c.ammo_stored = 0.0
-	cam_heading = 0.0
+	cam_heading = own_head
 	if not _dist_forced:
 		cam_dist = maxf(70.0, player.wlen() * 1.15)
 	track = TrackProjection.new()
@@ -175,7 +195,8 @@ func _spawn_fleet() -> void:
 		for i in n_allies:
 			var cls_a: String = pool_a[(i + 1) % pool_a.size()]
 			var off_a := Vector3((i % 6 - 2.5) * 650.0, 0, 650.0 + (i / 6) * 650.0)
-			_spawn(cls_a, 0, _find_water((ground["spawn_a"] as Vector3) + off_a), false)
+			var sa := _spawn(cls_a, 0, _find_water((ground["spawn_a"] as Vector3) + off_a * (1.0 if own_head == 0.0 else -1.0)), false)
+			sa.heading = own_head
 	var cnt := [0, 0]
 	for n in get_tree().get_nodes_in_group("ships"):
 		cnt[clampi((n as Ship).team, 0, 1)] += 1
@@ -368,6 +389,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_cycle_camera()
 		elif k == KEY_M:
 			hud.toggle_map()
+		elif k == KEY_ESCAPE and GameSession.launched:
+			GameSession.back_to_menu(get_tree())
 		elif k >= KEY_F1 and k <= KEY_F7:
 			ground_id = Battlegrounds.all_grounds()[k - KEY_F1]["id"]
 			get_tree().reload_current_scene()

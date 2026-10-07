@@ -94,7 +94,7 @@ func _plume(c: Compartment, mi: MeshInstance3D, on: bool) -> void:
 
 func _process(delta: float) -> void:
 	_t += delta
-	var gun_node: Object = ship.get_meta("gunnery", null)
+	var gun_node: Object = ship.get_meta("gunnery") if ship.has_meta("gunnery") else null
 	for c in parts:
 		var mi: MeshInstance3D = parts[c]
 		var mat: StandardMaterial3D = _mats[c]

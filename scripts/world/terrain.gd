@@ -41,47 +41,67 @@ func build(p_ground: Dictionary) -> void:
 # --- Generation -----------------------------------------------------------
 
 func _generate() -> void:
-	var noise := FastNoiseLite.new()
-	noise.seed = ground["seed"]
-	noise.frequency = 0.0006
-	noise.fractal_octaves = 5
-	var base: float = ground["base_depth"]
+	var noise := make_noise(ground)
 	for j in GRID:
 		for i in GRID:
-			var p := _cell_to_world(i, j)
-			var h := -base * (0.75 + 0.25 * noise.get_noise_2d(p.x, p.y))
-			# Seabed trenches (deep shipping channels).
-			for t in ground.get("trenches", []):
-				var d := _dist_to_segment(p, t["from"], t["to"])
-				var w: float = t["width"] * 0.5
-				if d < w * 1.6:
-					var k := 1.0 - smoothstep(w * 0.4, w * 1.6, d)
-					h = minf(h, lerpf(h, -t["depth"], k))
-			# Shoals / banks (shallow patches).
-			for b in ground.get("banks", []):
-				var d2 := p.distance_to(b["pos"])
-				var r: float = b["radius"]
-				if d2 < r * 1.5:
-					var k2 := 1.0 - smoothstep(r * 0.3, r * 1.5, d2)
-					h = maxf(h, lerpf(h, -b["depth"], k2))
-			# Land masses.
-			for l in ground.get("land", []):
-				var d3 := p.distance_to(l["pos"])
-				var r2: float = l["radius"]
-				if d3 < r2 * 1.35:
-					var edge := 1.0 - smoothstep(r2 * 0.55 if not l.get("cliff", false) else r2 * 0.88, r2 * 1.35, d3)
-					var rough := 0.65 + 0.35 * noise.get_noise_2d(p.x * 3.1, p.y * 3.1)
-					var land_h: float = l["height"] * edge * rough
-					# Continuous with the seabed: land rises out of the water.
-					h = maxf(h, lerpf(h, land_h - 4.0, edge))
-					if l.get("cliff", false) and edge > 0.2 and edge < 0.9 and h > 2.0:
-						cliff_cells[j * GRID + i] = 1
-			heights[j * GRID + i] = h
+			var r := sample(ground, noise, _cell_to_world(i, j))
+			heights[j * GRID + i] = r.x
+			if r.y > 0.5:
+				cliff_cells[j * GRID + i] = 1
 	for l in ground.get("land", []):
 		if l.get("fort", false):
 			var pos2: Vector2 = l["pos"]
 			var peak := Vector3(pos2.x - 600.0, height_at(pos2.x - 600.0, pos2.y - 2200.0), pos2.y - 2200.0)
 			forts.append({"pos": peak, "hp": 800.0, "alive": true})
+
+
+static func make_noise(g: Dictionary) -> FastNoiseLite:
+	var noise := FastNoiseLite.new()
+	noise.seed = g["seed"]
+	noise.frequency = 0.0006
+	noise.fractal_octaves = 5
+	return noise
+
+
+## Terrain height at a world XZ point (x = height in m, y = 1.0 if cliff material). Pure function
+## of the ground definition, so the menu's topographic map uses exactly the same formula.
+static func sample(g: Dictionary, noise: FastNoiseLite, p: Vector2) -> Vector2:
+	var cliff := 0.0
+	var base: float = g["base_depth"]
+	var h := -base * (0.75 + 0.25 * noise.get_noise_2d(p.x, p.y))
+	# Seabed trenches (deep shipping channels).
+	for t in g.get("trenches", []):
+		var d := _seg_dist(p, t["from"], t["to"])
+		var w: float = t["width"] * 0.5
+		if d < w * 1.6:
+			var k := 1.0 - smoothstep(w * 0.4, w * 1.6, d)
+			h = minf(h, lerpf(h, -t["depth"], k))
+	# Shoals / banks (shallow patches).
+	for b in g.get("banks", []):
+		var d2 := p.distance_to(b["pos"])
+		var r: float = b["radius"]
+		if d2 < r * 1.5:
+			var k2 := 1.0 - smoothstep(r * 0.3, r * 1.5, d2)
+			h = maxf(h, lerpf(h, -b["depth"], k2))
+	# Land masses.
+	for l in g.get("land", []):
+		var d3 := p.distance_to(l["pos"])
+		var r2: float = l["radius"]
+		if d3 < r2 * 1.35:
+			var edge := 1.0 - smoothstep(r2 * 0.55 if not l.get("cliff", false) else r2 * 0.88, r2 * 1.35, d3)
+			var rough := 0.65 + 0.35 * noise.get_noise_2d(p.x * 3.1, p.y * 3.1)
+			var land_h: float = l["height"] * edge * rough
+			# Continuous with the seabed: land rises out of the water.
+			h = maxf(h, lerpf(h, land_h - 4.0, edge))
+			if l.get("cliff", false) and edge > 0.2 and edge < 0.9 and h > 2.0:
+				cliff = 1.0
+	return Vector2(h, cliff)
+
+
+static func _seg_dist(p: Vector2, a: Vector2, b: Vector2) -> float:
+	var ab := b - a
+	var t := clampf((p - a).dot(ab) / maxf(ab.length_squared(), 0.001), 0.0, 1.0)
+	return p.distance_to(a + ab * t)
 
 
 func _cell_to_world(i: int, j: int) -> Vector2:
