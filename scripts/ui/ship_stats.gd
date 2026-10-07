@@ -55,11 +55,14 @@ func _radar_values() -> Array[float]:
 func _draw() -> void:
 	if entry.is_empty():
 		return
-	var font := ThemeDB.fallback_font
+	var fsemi := UIKit.font("semi")
+	var fcaps := UIKit.font("caps")
+	var fbody := UIKit.font("body")
 	var m := _norms()
+	var gold := UIKit.GOLD
 	# --- radar ---
 	var c := Vector2(150, 150)
-	var rad := 105.0
+	var rad := 100.0
 	var vals := _radar_values()
 	for ring in [0.25, 0.5, 0.75, 1.0]:
 		var pts := PackedVector2Array()
@@ -67,19 +70,35 @@ func _draw() -> void:
 			var a := -PI * 0.5 + TAU * k / 6.0
 			pts.append(c + Vector2(cos(a), sin(a)) * rad * ring)
 		pts.append(pts[0])
-		draw_polyline(pts, Color(0.5, 0.65, 0.8, 0.28 if ring < 1.0 else 0.55), 1.0)
+		draw_polyline(pts, Color(0.6, 0.75, 0.95, 0.10 if ring < 1.0 else 0.30), 1.0, true)
+	if true:
+		var back := PackedVector2Array()
+		for k in 6:
+			var a0 := -PI * 0.5 + TAU * k / 6.0
+			back.append(c + Vector2(cos(a0), sin(a0)) * rad)
+		draw_colored_polygon(back, Color(1, 1, 1, 0.025))
 	var poly := PackedVector2Array()
 	for k in 6:
 		var a2 := -PI * 0.5 + TAU * k / 6.0
 		var dir := Vector2(cos(a2), sin(a2))
-		draw_line(c, c + dir * rad, Color(0.5, 0.65, 0.8, 0.3), 1.0)
-		poly.append(c + dir * rad * clampf(vals[k], 0.04, 1.0))
-		var lp := c + dir * (rad + 22.0)
-		var w := font.get_string_size(AXES[k], HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
-		draw_string(font, lp + Vector2(-w * 0.5, 5), AXES[k], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.7, 0.82, 0.95))
-	draw_colored_polygon(poly, Color(1.0, 0.72, 0.2, 0.30))
-	poly.append(poly[0])
-	draw_polyline(poly, Color(1.0, 0.78, 0.3), 2.0)
+		draw_line(c, c + dir * rad, Color(0.6, 0.75, 0.95, 0.14), 1.0, true)
+		poly.append(c + dir * rad * clampf(vals[k], 0.05, 1.0))
+		var lp := c + dir * (rad + 24.0)
+		var w := fcaps.get_string_size(AXES[k], HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+		draw_string(fcaps, lp + Vector2(-w * 0.5, 4), AXES[k], HORIZONTAL_ALIGNMENT_LEFT, -1, 11, UIKit.DIM)
+	# glow layers then the shape
+	var glow_loop := poly.duplicate()
+	glow_loop.append(poly[0])
+	draw_polyline(glow_loop, Color(gold.r, gold.g, gold.b, 0.12), 9.0, true)
+	draw_polyline(glow_loop, Color(gold.r, gold.g, gold.b, 0.18), 5.0, true)
+	var fills := PackedColorArray()
+	for p in poly:
+		fills.append(Color(gold.r, gold.g, gold.b, 0.18 + 0.30 * (1.0 - p.distance_to(c) / rad)))
+	draw_polygon(poly, fills)
+	draw_polyline(glow_loop, gold, 2.0, true)
+	for p in poly:
+		draw_circle(p, 4.5, Color(0, 0, 0, 0.45))
+		draw_circle(p, 3.5, Color(1, 0.92, 0.7))
 	# --- bars ---
 	var g: Dictionary = entry["main_gun"]
 	var a: Dictionary = entry["armor"]
@@ -99,15 +118,16 @@ func _draw() -> void:
 		["LENGTH", "%.0f m" % float(entry["length_m"]), float(entry["length_m"]) / 280.0],
 	]
 	var x0 := 320.0
-	var y := 32.0
+	var y := 28.0
+	var bw := size.x - x0 - 10.0
 	for r in rows:
-		draw_string(font, Vector2(x0, y), r[0], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.62, 0.74, 0.88))
+		draw_string(fcaps, Vector2(x0, y), r[0], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, UIKit.DIM)
 		var vs: String = r[1]
-		var vw := font.get_string_size(vs, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x
-		draw_string(font, Vector2(size.x - 8.0 - vw, y), vs, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1, 0.95, 0.85))
-		var bw := size.x - x0 - 8.0
-		draw_rect(Rect2(x0, y + 5, bw, 6), Color(0.15, 0.22, 0.3))
-		draw_rect(Rect2(x0, y + 5, bw * clampf(float(r[2]), 0.02, 1.0), 6), Color(1.0, 0.72, 0.2))
+		var vw := fsemi.get_string_size(vs, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
+		draw_string(fsemi, Vector2(size.x - 10.0 - vw, y), vs, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1, 0.97, 0.9))
+		UIKit.fill_round(self, Rect2(x0, y + 6, bw, 6), 3.0, Color(1, 1, 1, 0.09), Color(1, 1, 1, 0.05))
+		var fw := maxf(bw * clampf(float(r[2]), 0.02, 1.0), 6.0)
+		UIKit.fill_round(self, Rect2(x0, y + 6, fw, 6), 3.0, Color("ffd77a"), Color("e8962a"))
 		y += 26.0
 
 

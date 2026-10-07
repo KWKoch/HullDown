@@ -42,7 +42,7 @@ static func tint(h: float) -> Color:
 
 
 ## Top-down shaded-relief image, north up and east right (game compass: +Z north, -X east).
-static func thumbnail(g: Dictionary, n: int = 96) -> ImageTexture:
+static func thumbnail(g: Dictionary, n: int = 128) -> ImageTexture:
 	var hs := grid(g, n)
 	var img := Image.create(n, n, false, Image.FORMAT_RGB8)
 	var size: Vector2 = g["size_m"]
@@ -61,6 +61,8 @@ static func thumbnail(g: Dictionary, n: int = 96) -> ImageTexture:
 			var shade := 1.0 + clampf(slope * (6.0 if h > 0.0 else 1.5), -0.45, 0.45)
 			var c := tint(h)
 			img.set_pixel(sx, sy, Color(c.r * shade, c.g * shade, c.b * shade))
+	img.resize(512, 512, Image.INTERPOLATE_LANCZOS)
+	img.generate_mipmaps()
 	return ImageTexture.create_from_image(img)
 
 

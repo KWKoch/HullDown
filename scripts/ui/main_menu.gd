@@ -2,9 +2,9 @@ extends Control
 ## Main menu: PLAY (PvP / Story headers + Skirmish launcher), FLEET STORE (roster, 3D viewer,
 ## infographics), MAPS (thumbnails that open a 3D topographic map with waypoints and concealment).
 
-const GOLD := Color(1.0, 0.76, 0.28)
-const INK := Color(0.9, 0.94, 0.98)
-const DIM := Color(0.62, 0.72, 0.84)
+const GOLD := UIKit.GOLD
+const INK := UIKit.INK
+const DIM := UIKit.DIM
 const PANEL := Color(0.075, 0.11, 0.16, 0.96)
 
 const TYPE_BLURB := {
@@ -54,6 +54,7 @@ var vis_btn: Button
 
 func _ready() -> void:
 	GameSession.launched = false
+	theme = UIKit.make_theme()
 	mouse_filter = Control.MOUSE_FILTER_PASS
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	_build_bg()
@@ -108,17 +109,17 @@ func _start_tab() -> int:
 
 # --- chrome ------------------------------------------------------------------
 
-func _style(bg: Color, border: Color = Color(0.25, 0.35, 0.48), bw: int = 1, rad: int = 4) -> StyleBoxFlat:
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = bg
-	sb.border_color = border
-	sb.set_border_width_all(bw)
-	sb.set_corner_radius_all(rad)
-	sb.content_margin_left = 14
-	sb.content_margin_right = 14
-	sb.content_margin_top = 10
-	sb.content_margin_bottom = 10
-	return sb
+func _style(bg: Color, border: Color = Color(0.25, 0.35, 0.48), bw: int = 1, rad: int = 4) -> StyleBox:
+	if bg.a < 0.02 and bw == 0:
+		return StyleBoxEmpty.new()
+	var transparent := bg.a < 0.02
+	var bx := UIKit.box(Color(0, 0, 0, 0) if transparent else bg.lightened(0.08), Color(0, 0, 0, 0) if transparent else bg.darkened(0.14),
+		Color(border.r, border.g, border.b, 0.9 if bw >= 2 else 0.5), 14.0, 0.0 if transparent else 0.55)
+	bx.border_w = 1.8 if bw >= 2 else 1.2
+	if rad == 0:
+		bx.radius = 0.0
+		bx.shadow = 0.0
+	return bx
 
 
 func _lbl(text: String, size: int, col: Color = INK, wrap: bool = false) -> Label:
@@ -126,6 +127,10 @@ func _lbl(text: String, size: int, col: Color = INK, wrap: bool = false) -> Labe
 	l.text = text
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color", col)
+	if size >= 30:
+		l.add_theme_font_override("font", UIKit.font("head"))
+	elif size >= 17:
+		l.add_theme_font_override("font", UIKit.font("semi"))
 	if wrap:
 		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	return l
@@ -136,62 +141,85 @@ func _btn(text: String, cb: Callable, accent: Color = GOLD, size: int = 20) -> B
 	b.text = text
 	b.focus_mode = Control.FOCUS_NONE
 	b.add_theme_font_size_override("font_size", size)
+	b.add_theme_font_override("font", UIKit.font("caps"))
 	b.add_theme_color_override("font_color", INK)
 	b.add_theme_color_override("font_hover_color", Color.WHITE)
-	b.add_theme_color_override("font_disabled_color", Color(0.45, 0.5, 0.56))
-	b.add_theme_stylebox_override("normal", _style(Color(0.12, 0.17, 0.24), accent.darkened(0.2), 2))
-	b.add_theme_stylebox_override("hover", _style(Color(0.17, 0.24, 0.34), accent, 2))
-	b.add_theme_stylebox_override("pressed", _style(accent.darkened(0.55), accent, 2))
-	b.add_theme_stylebox_override("disabled", _style(Color(0.09, 0.11, 0.14), Color(0.22, 0.26, 0.32), 1))
+	b.add_theme_color_override("font_disabled_color", Color(0.45, 0.5, 0.58))
+	for st in ["normal", "hover", "pressed", "disabled"]:
+		b.add_theme_stylebox_override(st, UIKit.button_box(accent, st))
 	b.pressed.connect(cb)
 	return b
 
 
+func _primary(b: Button, col: Color) -> Button:
+	b.add_theme_stylebox_override("normal", UIKit.box(col.lightened(0.05), col.darkened(0.35), Color(1, 1, 1, 0.45), 14.0, 0.5, Color(col.r, col.g, col.b, 0.35), 12.0))
+	b.add_theme_stylebox_override("hover", UIKit.box(col.lightened(0.2), col.darkened(0.2), Color(1, 1, 1, 0.7), 14.0, 0.5, Color(col.r, col.g, col.b, 0.6), 12.0))
+	b.add_theme_stylebox_override("pressed", UIKit.box(col.darkened(0.2), col.darkened(0.5), Color(1, 1, 1, 0.5), 14.0, 0.0, Color(0, 0, 0, 0), 12.0))
+	b.add_theme_color_override("font_color", Color("04140a"))
+	b.add_theme_color_override("font_hover_color", Color("04140a"))
+	return b
+
+
 func _build_bg() -> void:
-	var bg := ColorRect.new()
-	bg.color = Color(0.04, 0.06, 0.1)
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(bg)
-	var grad := TextureRect.new()
-	var gt := GradientTexture2D.new()
-	var gr := Gradient.new()
-	gr.set_color(0, Color(0.10, 0.17, 0.26, 0.9))
-	gr.set_color(1, Color(0.02, 0.03, 0.05, 0.0))
-	gt.gradient = gr
-	gt.fill = GradientTexture2D.FILL_RADIAL
-	gt.fill_from = Vector2(0.5, 0.0)
-	gt.fill_to = Vector2(0.5, 1.0)
-	gt.width = 512
-	gt.height = 512
-	grad.texture = gt
-	grad.stretch_mode = TextureRect.STRETCH_SCALE
-	grad.set_anchors_preset(Control.PRESET_FULL_RECT)
-	grad.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(grad)
+	add_child(UIKit.Backdrop.new())
 
 
 func _build_top() -> void:
 	var bar := Panel.new()
-	bar.add_theme_stylebox_override("panel", _style(Color(0.05, 0.08, 0.12, 0.98), Color(0.2, 0.3, 0.42), 0, 0))
+	var bb := UIKit.box(Color(0.05, 0.08, 0.13, 0.92), Color(0.03, 0.05, 0.09, 0.88), Color(1, 1, 1, 0.0), 0.0, 0.0)
+	bb.border_w = 0.0
+	bar.add_theme_stylebox_override("panel", bb)
 	bar.position = Vector2.ZERO
 	bar.size = Vector2(1920, 92)
 	add_child(bar)
-	var t := _lbl("HULL DOWN", 44, GOLD)
-	t.position = Vector2(36, 8)
+	var gt := GradientTexture2D.new()
+	var gr := Gradient.new()
+	gr.colors = PackedColorArray([Color(GOLD.r, GOLD.g, GOLD.b, 0.0), Color(GOLD.r, GOLD.g, GOLD.b, 0.85), Color(GOLD.r, GOLD.g, GOLD.b, 0.0)])
+	gr.offsets = PackedFloat32Array([0.0, 0.5, 1.0])
+	gt.gradient = gr
+	gt.fill_from = Vector2(0, 0)
+	gt.fill_to = Vector2(1, 0)
+	gt.width = 512
+	gt.height = 2
+	var ln := TextureRect.new()
+	ln.texture = gt
+	ln.stretch_mode = TextureRect.STRETCH_SCALE
+	ln.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	ln.position = Vector2(0, 90)
+	ln.size = Vector2(1920, 2)
+	add_child(ln)
+	var t := _lbl("HULL DOWN", 46, GOLD)
+	t.position = Vector2(40, 8)
+	t.add_theme_color_override("font_shadow_color", Color(GOLD.r, GOLD.g, GOLD.b, 0.35))
+	t.add_theme_constant_override("shadow_outline_size", 12)
 	add_child(t)
-	var st := _lbl("SQUATCH SQUAD STUDIOS  -  WWII NAVAL COMBAT", 13, DIM)
-	st.position = Vector2(40, 66)
+	var st := _lbl("SQUATCH SQUAD STUDIOS", 12, DIM)
+	st.add_theme_font_override("font", UIKit.font("caps"))
+	st.position = Vector2(44, 68)
 	add_child(st)
+	# pill tab group
+	var grp := Panel.new()
+	grp.add_theme_stylebox_override("panel", UIKit.box(Color(1, 1, 1, 0.05), Color(1, 1, 1, 0.02), Color(1, 1, 1, 0.12), 30.0, 0.0))
+	grp.position = Vector2(600, 16)
+	grp.size = Vector2(720, 60)
+	add_child(grp)
 	var names := ["PLAY", "FLEET STORE", "MAPS"]
 	for k in 3:
-		var b := _btn(names[k], _show_tab.bind(k), GOLD, 22)
-		b.position = Vector2(620 + k * 230, 18)
-		b.size = Vector2(212, 56)
+		var b := Button.new()
+		b.text = names[k]
+		b.focus_mode = Control.FOCUS_NONE
+		b.add_theme_font_override("font", UIKit.font("caps"))
+		b.add_theme_font_size_override("font_size", 17)
+		b.add_theme_color_override("font_color", DIM)
+		b.add_theme_color_override("font_hover_color", Color.WHITE)
+		b.position = Vector2(606 + k * 236, 22)
+		b.size = Vector2(228, 48)
+		b.pressed.connect(_show_tab.bind(k))
 		add_child(b)
 		tab_btns.append(b)
-	credits_lbl = _lbl("TEST BUILD  -  ALL SHIPS UNLOCKED", 15, DIM)
-	credits_lbl.position = Vector2(1500, 34)
+	credits_lbl = _lbl("TEST BUILD  -  ALL SHIPS UNLOCKED", 13, DIM)
+	credits_lbl.add_theme_font_override("font", UIKit.font("caps"))
+	credits_lbl.position = Vector2(1480, 38)
 	add_child(credits_lbl)
 
 
@@ -200,7 +228,20 @@ func _show_tab(k: int) -> void:
 	for i in pages.size():
 		pages[i].visible = (i == k)
 	for i in tab_btns.size():
-		tab_btns[i].add_theme_stylebox_override("normal", _style(Color(0.28, 0.2, 0.06) if i == k else Color(0.12, 0.17, 0.24), GOLD if i == k else GOLD.darkened(0.45), 2))
+		var on := (i == k)
+		var nb := UIKit.box(GOLD.darkened(0.15) if on else Color(0, 0, 0, 0), GOLD.darkened(0.55) if on else Color(0, 0, 0, 0),
+			Color(GOLD.r, GOLD.g, GOLD.b, 0.9) if on else Color(0, 0, 0, 0), 24.0, 0.0, Color(GOLD.r, GOLD.g, GOLD.b, 0.45) if on else Color(0, 0, 0, 0), 8.0)
+		tab_btns[i].add_theme_stylebox_override("normal", nb)
+		tab_btns[i].add_theme_stylebox_override("hover", nb if on else UIKit.box(Color(1, 1, 1, 0.07), Color(1, 1, 1, 0.03), Color(1, 1, 1, 0.12), 24.0, 0.0, Color(0, 0, 0, 0), 8.0))
+		tab_btns[i].add_theme_stylebox_override("pressed", nb)
+		tab_btns[i].add_theme_color_override("font_color", Color("1a1204") if on else DIM)
+		tab_btns[i].add_theme_color_override("font_hover_color", Color("1a1204") if on else Color.WHITE)
+	var pg: Control = pages[k]
+	pg.modulate.a = 0.0
+	pg.position.y = 112
+	var tw := create_tween().set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.tween_property(pg, "modulate:a", 1.0, 0.28)
+	tw.tween_property(pg, "position:y", 92.0, 0.28)
 	if k == 2:
 		_queue_thumbs()
 
@@ -226,7 +267,7 @@ func _build_play() -> Control:
 	# Skirmish
 	var x3 := cx + (w + 30) * 2
 	var card := Panel.new()
-	card.add_theme_stylebox_override("panel", _style(PANEL, GOLD, 2))
+	card.add_theme_stylebox_override("panel", UIKit.box(Color(0.15, 0.17, 0.2, 0.92), Color(0.07, 0.085, 0.12, 0.94), Color(GOLD.r, GOLD.g, GOLD.b, 0.75), 18.0, 0.8, Color(GOLD.r, GOLD.g, GOLD.b, 0.22), 14.0))
 	card.position = Vector2(x3, 40)
 	card.size = Vector2(w, 880)
 	page.add_child(card)
@@ -262,7 +303,7 @@ func _build_play() -> Control:
 	bs.position = Vector2(24 + (w - 60) * 0.5 + 12, 600)
 	bs.size = Vector2((w - 60) * 0.5, 50)
 	card.add_child(bs)
-	var go := _btn("LAUNCH BATTLE", _launch, Color(0.4, 0.9, 0.5), 30)
+	var go := _primary(_btn("LAUNCH BATTLE", _launch, Color(0.4, 0.9, 0.5), 30), Color("4ade80"))
 	go.position = Vector2(24, 700)
 	go.size = Vector2(w - 48, 90)
 	card.add_child(go)
@@ -274,26 +315,36 @@ func _build_play() -> Control:
 
 func _mode_card(page: Control, pos: Vector2, w: float, title: String, tag: String, col: Color, bullets: Array, status: String) -> void:
 	var card := Panel.new()
-	card.add_theme_stylebox_override("panel", _style(PANEL, col.darkened(0.45), 2))
+	card.add_theme_stylebox_override("panel", UIKit.glass(18.0, 0.8))
 	card.position = pos
 	card.size = Vector2(w, 880)
 	page.add_child(card)
-	var band := ColorRect.new()
-	band.color = col.darkened(0.55)
-	band.position = Vector2(2, 2)
-	band.size = Vector2(w - 4, 130)
+	var band := Panel.new()
+	band.add_theme_stylebox_override("panel", UIKit.box(col.darkened(0.25), col.darkened(0.7), Color(col.r, col.g, col.b, 0.5), 14.0, 0.0))
+	band.position = Vector2(12, 12)
+	band.size = Vector2(w - 24, 124)
 	card.add_child(band)
-	var h := _lbl(title, 46, col.lightened(0.2))
-	h.position = Vector2(26, 14)
+	var h := _lbl(title, 46, col.lightened(0.25))
+	h.position = Vector2(32, 24)
 	card.add_child(h)
-	var tg := _lbl(tag, 17, INK)
-	tg.position = Vector2(28, 84)
+	var tg := _lbl(tag, 14, INK)
+	tg.add_theme_font_override("font", UIKit.font("caps"))
+	tg.position = Vector2(34, 92)
 	card.add_child(tg)
-	var y := 170.0
+	var wm := _lbl("15 v 15" if title == "PVP" else "1939-45", 120, Color(col.r, col.g, col.b, 0.07))
+	wm.position = Vector2(20, 560)
+	wm.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(wm)
+	var y := 172.0
 	for b in bullets:
-		var bl := _lbl("-  " + String(b), 18, Color(0.8, 0.85, 0.9), true)
-		bl.position = Vector2(30, y)
-		bl.size = Vector2(w - 60, 60)
+		var dot := Panel.new()
+		dot.add_theme_stylebox_override("panel", UIKit.box(col.lightened(0.2), col, Color(0, 0, 0, 0), 5.0, 0.0, Color(col.r, col.g, col.b, 0.6), 0.0))
+		dot.position = Vector2(32, y + 9)
+		dot.size = Vector2(10, 10)
+		card.add_child(dot)
+		var bl := _lbl(String(b), 18, Color(0.82, 0.87, 0.93), true)
+		bl.position = Vector2(54, y)
+		bl.size = Vector2(w - 84, 60)
 		card.add_child(bl)
 		y += 78.0
 	var dis := _btn(status, func(): pass, col, 22)
@@ -307,7 +358,7 @@ func _refresh_selection() -> void:
 	var g := Battlegrounds.get_ground(GameSession.ground_id)
 	var e := Roster.get_entry(GameSession.ship_id)
 	if play_map_thumb != null and not g.is_empty():
-		play_map_thumb.texture = MapData.thumbnail(g, 80)
+		play_map_thumb.texture = MapData.thumbnail(g)
 		play_map_lbl.text = "%s\n%s" % [g["name"], g["date"]]
 	if play_ship_lbl != null and not e.is_empty():
 		play_ship_lbl.text = String(e["name"])
@@ -328,7 +379,7 @@ func _build_fleet() -> Control:
 	page.position = Vector2(0, 92)
 	page.size = Vector2(1920, 988)
 	var left := Panel.new()
-	left.add_theme_stylebox_override("panel", _style(PANEL, Color(0.25, 0.35, 0.48), 1))
+	left.add_theme_stylebox_override("panel", UIKit.glass(18.0, 0.7))
 	left.position = Vector2(24, 20)
 	left.size = Vector2(420, 944)
 	page.add_child(left)
@@ -363,7 +414,7 @@ func _build_fleet() -> Control:
 	viewer.size = Vector2(800, 944)
 	page.add_child(viewer)
 	var vframe := Panel.new()
-	vframe.add_theme_stylebox_override("panel", _style(Color(0, 0, 0, 0), Color(0.25, 0.35, 0.48), 1))
+	vframe.add_theme_stylebox_override("panel", UIKit.box(Color(0, 0, 0, 0), Color(0, 0, 0, 0), Color(1, 1, 1, 0.2), 14.0, 0.0, Color(0, 0, 0, 0), 0.0))
 	vframe.position = viewer.position
 	vframe.size = viewer.size
 	vframe.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -373,7 +424,7 @@ func _build_fleet() -> Control:
 	page.add_child(hint)
 
 	var right := Panel.new()
-	right.add_theme_stylebox_override("panel", _style(PANEL, Color(0.25, 0.35, 0.48), 1))
+	right.add_theme_stylebox_override("panel", UIKit.glass(18.0, 0.7))
 	right.position = Vector2(1276, 20)
 	right.size = Vector2(620, 944)
 	page.add_child(right)
@@ -398,7 +449,7 @@ func _build_fleet() -> Control:
 	var own := _lbl("OWNED  (test build: every ship is unlocked)", 15, Color(0.5, 1.0, 0.6))
 	own.position = Vector2(22, 800)
 	right.add_child(own)
-	select_btn = _btn("SELECT FOR SKIRMISH", _select_ship, Color(0.4, 0.9, 0.5), 24)
+	select_btn = _primary(_btn("SELECT FOR SKIRMISH", _select_ship, Color(0.4, 0.9, 0.5), 24), Color("4ade80"))
 	select_btn.position = Vector2(22, 840)
 	select_btn.size = Vector2(576, 78)
 	right.add_child(select_btn)
@@ -429,15 +480,48 @@ func _fill_list() -> void:
 		var b := Button.new()
 		b.focus_mode = Control.FOCUS_NONE
 		b.custom_minimum_size = Vector2(388, 66)
-		b.text = "%s\n%s  -  %s" % [e["name"], String(e["type"]).replace("_", " ").capitalize(), e["nation"]]
-		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		b.add_theme_font_size_override("font_size", 16)
-		b.add_theme_color_override("font_color", INK)
 		var id: String = e["id"]
 		b.pressed.connect(_browse.bind(id))
+		var nm := Label.new()
+		nm.text = String(e["name"])
+		nm.add_theme_font_override("font", UIKit.font("semi"))
+		nm.add_theme_font_size_override("font_size", 16)
+		nm.add_theme_color_override("font_color", INK)
+		nm.position = Vector2(26, 9)
+		nm.size = Vector2(350, 24)
+		nm.clip_text = true
+		nm.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		b.add_child(nm)
+		var sb := Label.new()
+		sb.text = "%s  -  %s" % [String(e["type"]).replace("_", " ").to_upper(), String(e["nation"]).to_upper()]
+		sb.add_theme_font_override("font", UIKit.font("caps"))
+		sb.add_theme_font_size_override("font_size", 11)
+		sb.add_theme_color_override("font_color", DIM)
+		sb.position = Vector2(26, 37)
+		sb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		b.add_child(sb)
+		var nc := _nation_color(String(e["nation"]))
+		var stripe := Panel.new()
+		stripe.add_theme_stylebox_override("panel", UIKit.box(nc.lightened(0.15), nc.darkened(0.3), Color(0, 0, 0, 0), 3.0, 0.0, Color(nc.r, nc.g, nc.b, 0.4), 0.0))
+		stripe.position = Vector2(11, 14)
+		stripe.size = Vector2(5, 38)
+		stripe.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		b.add_child(stripe)
 		ship_list.add_child(b)
 		_row_btns[id] = b
 	_style_rows()
+
+
+func _nation_color(n: String) -> Color:
+	match n:
+		"USA": return Color("4a86e8")
+		"Japan": return Color("ef4b4b")
+		"United Kingdom": return Color("d9453d")
+		"Germany": return Color("9aa4b2")
+		"Italy": return Color("4cb87a")
+		"France": return Color("6fb7ff")
+		"USSR": return Color("e0484d")
+	return Color("8fa3bd")
 
 
 func _style_rows() -> void:
@@ -445,10 +529,12 @@ func _style_rows() -> void:
 		var b: Button = _row_btns[id]
 		var sel: bool = (id == _browse_id)
 		var chosen: bool = (id == GameSession.ship_id)
-		var border := GOLD if sel else (Color(0.4, 0.9, 0.5) if chosen else Color(0.22, 0.3, 0.4))
-		b.add_theme_stylebox_override("normal", _style(Color(0.2, 0.15, 0.06) if sel else Color(0.1, 0.14, 0.2), border, 2 if (sel or chosen) else 1))
-		b.add_theme_stylebox_override("hover", _style(Color(0.16, 0.22, 0.31), GOLD, 2))
-		b.add_theme_stylebox_override("pressed", _style(Color(0.25, 0.18, 0.06), GOLD, 2))
+		var acc := GOLD if sel else (UIKit.GREEN if chosen else Color(1, 1, 1))
+		var n := UIKit.box(Color(0.30, 0.22, 0.08, 0.95) if sel else Color(0.12, 0.17, 0.26, 0.85), Color(0.15, 0.11, 0.05, 0.95) if sel else Color(0.07, 0.10, 0.16, 0.85),
+			Color(acc.r, acc.g, acc.b, 0.85 if (sel or chosen) else 0.13), 12.0, 0.0, Color(GOLD.r, GOLD.g, GOLD.b, 0.3) if sel else Color(0, 0, 0, 0), 6.0)
+		b.add_theme_stylebox_override("normal", n)
+		b.add_theme_stylebox_override("hover", UIKit.box(Color(0.2, 0.28, 0.4, 0.95), Color(0.12, 0.17, 0.26, 0.95), Color(UIKit.CYAN.r, UIKit.CYAN.g, UIKit.CYAN.b, 0.7), 12.0, 0.0, Color(UIKit.CYAN.r, UIKit.CYAN.g, UIKit.CYAN.b, 0.22), 6.0))
+		b.add_theme_stylebox_override("pressed", n)
 
 
 func _browse(id: String) -> void:
@@ -540,7 +626,7 @@ func _process(d: float) -> void:
 			get_tree().quit()
 	if _tab == 2 and not _thumb_queue.is_empty() and not overlay.visible:
 		var i: int = _thumb_queue.pop_front()
-		cards[i].set_texture(MapData.thumbnail(cards[i].ground, 96))
+		cards[i].set_texture(MapData.thumbnail(cards[i].ground))
 
 
 func _build_overlay() -> void:
@@ -550,7 +636,7 @@ func _build_overlay() -> void:
 	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(overlay)
 	var dim := ColorRect.new()
-	dim.color = Color(0, 0, 0, 0.82)
+	dim.color = Color(0.01, 0.02, 0.04, 0.86)
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
 	overlay.add_child(dim)
 
@@ -576,14 +662,14 @@ func _open_topo(gid: String) -> void:
 	topo.observer_changed.connect(func(_p): _update_topo_info())
 	wait.queue_free()
 	var frame := Panel.new()
-	frame.add_theme_stylebox_override("panel", _style(Color(0, 0, 0, 0), GOLD.darkened(0.3), 2))
+	frame.add_theme_stylebox_override("panel", UIKit.box(Color(0, 0, 0, 0), Color(0, 0, 0, 0), Color(GOLD.r, GOLD.g, GOLD.b, 0.6), 14.0, 0.0, Color(GOLD.r, GOLD.g, GOLD.b, 0.18), 0.0))
 	frame.position = topo.position
 	frame.size = topo.size
 	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	overlay.add_child(frame)
 	# side panel
 	var side := Panel.new()
-	side.add_theme_stylebox_override("panel", _style(PANEL, Color(0.25, 0.35, 0.48), 1))
+	side.add_theme_stylebox_override("panel", UIKit.glass(18.0, 0.7))
 	side.position = Vector2(1336, 30)
 	side.size = Vector2(556, 1020)
 	overlay.add_child(side)
@@ -605,10 +691,11 @@ func _open_topo(gid: String) -> void:
 	side.add_child(sh)
 	y += 26.0
 	for wp in Battlegrounds.waypoints(gid):
-		var sw := ColorRect.new()
-		sw.color = MapData.kind_color(wp["k"])
-		sw.position = Vector2(24, y + 6)
-		sw.size = Vector2(12, 12)
+		var sw := Panel.new()
+		var kc := MapData.kind_color(wp["k"])
+		sw.add_theme_stylebox_override("panel", UIKit.box(kc, kc.darkened(0.25), Color(1, 1, 1, 0.5), 6.0, 0.0, Color(kc.r, kc.g, kc.b, 0.5), 0.0))
+		sw.position = Vector2(24, y + 5)
+		sw.size = Vector2(13, 13)
 		side.add_child(sw)
 		var wl := _lbl("%s   (%s)" % [wp["n"], MapData.kind_label(wp["k"])], 15, INK)
 		wl.position = Vector2(46, y)
@@ -645,11 +732,11 @@ func _open_topo(gid: String) -> void:
 	rs.position = Vector2(366, 846)
 	rs.size = Vector2(168, 42)
 	side.add_child(rs)
-	var dep := _btn("USE FOR SKIRMISH", _use_map, Color(0.4, 0.9, 0.5), 20)
+	var dep := _primary(_btn("USE FOR SKIRMISH", _use_map, Color(0.4, 0.9, 0.5), 20), Color("4ade80"))
 	dep.position = Vector2(22, 900)
 	dep.size = Vector2(300, 56)
 	side.add_child(dep)
-	var cl := _btn("CLOSE", _close_topo, Color(1.0, 0.4, 0.35), 20)
+	var cl := _btn("CLOSE", _close_topo, Color("fb6a5e"), 20)
 	cl.position = Vector2(334, 900)
 	cl.size = Vector2(200, 56)
 	side.add_child(cl)

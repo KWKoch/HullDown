@@ -21,32 +21,60 @@ func _init() -> void:
 	vp.msaa_3d = Viewport.MSAA_4X
 	add_child(vp)
 	var env := Environment.new()
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.07, 0.11, 0.16)
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.55, 0.62, 0.72)
-	env.ambient_light_energy = 0.7
+	var sky := Sky.new()
+	var psm := ProceduralSkyMaterial.new()
+	psm.sky_top_color = Color(0.04, 0.09, 0.18)
+	psm.sky_horizon_color = Color(0.32, 0.42, 0.55)
+	psm.ground_horizon_color = Color(0.32, 0.42, 0.55)
+	psm.ground_bottom_color = Color(0.10, 0.20, 0.30)
+	psm.sun_angle_max = 8.0
+	sky.sky_material = psm
+	env.background_mode = Environment.BG_SKY
+	env.sky = sky
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	env.ambient_light_energy = 0.9
+	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	env.fog_enabled = true
+	env.fog_light_color = Color(0.30, 0.40, 0.52)
+	env.fog_density = 0.00035
 	var we := WorldEnvironment.new()
 	we.environment = env
 	vp.add_child(we)
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-38, 40, 0)
-	sun.light_energy = 1.25
+	sun.rotation_degrees = Vector3(-34, 40, 0)
+	sun.light_energy = 1.35
+	sun.light_color = Color(1.0, 0.95, 0.86)
+	sun.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY
 	vp.add_child(sun)
 	var fill := DirectionalLight3D.new()
 	fill.rotation_degrees = Vector3(-15, 220, 0)
-	fill.light_energy = 0.35
+	fill.light_energy = 0.3
+	fill.light_color = Color(0.7, 0.8, 1.0)
+	fill.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY
 	vp.add_child(fill)
-	# a calm sea disc
-	var disc := CylinderMesh.new()
-	disc.top_radius = 2600.0
-	disc.bottom_radius = 2600.0
-	disc.height = 1.0
-	var sm := StandardMaterial3D.new()
-	sm.albedo_color = Color(0.06, 0.16, 0.25)
-	sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	# glossy sea that fades into the horizon fog
+	var plane := PlaneMesh.new()
+	plane.size = Vector2(30000, 30000)
+	var sh := Shader.new()
+	sh.code = """
+shader_type spatial;
+render_mode cull_disabled;
+void fragment() {
+	vec3 wp = (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	float d = length(wp.xz);
+	vec3 deep = vec3(0.02, 0.10, 0.17);
+	vec3 shallow = vec3(0.06, 0.24, 0.34);
+	float rip = sin(wp.x * 0.05 + wp.z * 0.03) * sin(wp.z * 0.07 - wp.x * 0.02);
+	ALBEDO = mix(shallow, deep, clamp(d / 1500.0, 0.0, 1.0)) + vec3(0.02) * rip;
+	ROUGHNESS = 0.55;
+	METALLIC = 0.0;
+	SPECULAR = 0.25;
+}
+"""
+	var sm := ShaderMaterial.new()
+	sm.shader = sh
 	var sea := MeshInstance3D.new()
-	sea.mesh = disc
+	sea.mesh = plane
 	sea.material_override = sm
 	sea.position.y = -0.6
 	vp.add_child(sea)
