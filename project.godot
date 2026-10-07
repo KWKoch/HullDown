@@ -2,6 +2,7 @@
 config_version=5
 
 [application]
+config/icon="res://icons/icon_512.png"
 config/name="Hull Down"
 config/description="WWII naval combat. Squatch Squad Studios."
 run/main_scene="res://scenes/main_menu.tscn"
