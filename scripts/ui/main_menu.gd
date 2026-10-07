@@ -56,11 +56,11 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_PASS
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	_build_bg()
-	_build_top()
-	pages = [_build_play(), _build_fleet(), _build_yard(), _build_maps()]
+	pages = [_build_hangar(), _build_fleet(), _build_yard(), _build_maps(), _build_play()]
 	for p in pages:
 		add_child(p)
 	_fit_pages()
+	_build_topbar()
 	_build_overlay()
 	_browse_id = GameSession.ship_id
 	_fleet_nation = "USA"
@@ -106,7 +106,7 @@ func _start_tab() -> int:
 	var cl := OS.get_cmdline_user_args()
 	var i := cl.find("--tab")
 	if i >= 0 and i + 1 < cl.size():
-		return clampi(int(cl[i + 1]), 0, 3)
+		return clampi(int(cl[i + 1]), 0, 4)
 	return 0
 
 
@@ -170,7 +170,9 @@ func _build_bg() -> void:
 ## Navigation rail on the right (the old top ribbon, 30% larger, turned into vertical tabs). The
 ## rest of the screen, CONTENT_W wide, is the viewport each tab fills.
 const RAIL_W := 340.0
-const CONTENT_W := 1920.0 - RAIL_W
+const TOP_H := 96.0
+## Sub-pages are laid out CONTENT_W x 1080 and scaled to fill the area under the top bar.
+const CONTENT_W := 1920.0 * 1080.0 / (1080.0 - TOP_H)
 const MODE_COLS := [Color(0.35, 0.6, 1.0), Color(0.5, 0.85, 0.5), Color(1.0, 0.78, 0.3)]
 
 var _mode := 2
@@ -237,40 +239,28 @@ func _build_top() -> void:
 
 ## Where MobileMode puts its fullscreen button on this screen: the foot of the rail.
 func fullscreen_button_pos() -> Vector2:
-	return Vector2(1920.0 - RAIL_W * 0.5 - 32.0, 1000.0)
+	return Vector2(1920.0 - 84.0, 18.0)
 
 
 ## Pages are laid out for a 1920-wide screen; the store and map pages are scaled to fit the
 ## viewport left of the rail (the play page is built for it directly).
 func _fit_pages() -> void:
+	var sc := (1080.0 - TOP_H) / 1080.0
 	for i in pages.size():
 		var pg := pages[i]
-		if i != 3:
+		if i == 0:
 			pg.set_meta("y0", 0.0)
 			continue
-		var sc := CONTENT_W / 1920.0
+		if i == 3:
+			# The map grid is laid out 1920 x 988.
+			var ms := (1080.0 - TOP_H) / 1000.0
+			pg.scale = Vector2(ms, ms)
+			pg.position.x = (1920.0 - 1920.0 * ms) * 0.5
+			pg.set_meta("y0", TOP_H)
+			continue
 		pg.scale = Vector2(sc, sc)
 		pg.position.x = 0.0
-		pg.set_meta("y0", 0.0)
-		# Stretch the tall panels so the scaled page still fills the full height.
-		var delta := 1080.0 / sc - 988.0 - 20.0
-		pg.size.y += delta
-		for c in pg.get_children():
-			var cc := c as Control
-			if cc == null:
-				continue
-			if cc.size.y >= 880.0:
-				cc.size.y += delta
-				for g in cc.get_children():
-					var gc := g as Control
-					if gc == null:
-						continue
-					if gc is ScrollContainer:
-						gc.size.y += delta
-					elif gc.position.y >= 740.0:
-						gc.position.y += delta
-			elif cc.position.y >= 900.0:
-				cc.position.y += delta
+		pg.set_meta("y0", TOP_H)
 
 
 func _show_tab(k: int) -> void:
@@ -286,6 +276,9 @@ func _show_tab(k: int) -> void:
 		tab_btns[i].add_theme_stylebox_override("pressed", nb)
 		tab_btns[i].add_theme_color_override("font_color", Color("1a1204") if on else DIM)
 		tab_btns[i].add_theme_color_override("font_hover_color", Color("1a1204") if on else Color.WHITE)
+	_update_topbar()
+	if k == 0:
+		_refresh_hangar()
 	var pg: Control = pages[k]
 	var y0: float = pg.get_meta("y0", 0.0)
 	pg.modulate.a = 0.0
@@ -297,6 +290,381 @@ func _show_tab(k: int) -> void:
 		_queue_thumbs()
 	if k == 2:
 		_fill_yard()
+
+
+# --- HOME: the ship in port ---------------------------------------------------------
+# Layout follows the familiar mobile naval-game harbour screen: the selected ship fills the
+# screen in port, menus down the left, the loadout row and ship carousel along the bottom, and
+# a big BATTLE button bottom-right.
+
+const PAGE_TITLES := ["", "PORT", "SHIPYARD", "MAPS", "BATTLE MODES"]
+
+var _topbar_home: Control
+var _topbar_back: Control
+var _topbar_title: Label
+var hangar_view: ShipViewer
+var hangar_name: Label
+var hangar_role: Label
+var hangar_mode: Label
+var _car_box: HBoxContainer
+var _car_cards := {}
+var _toast: Label
+var _toast_t := 0.0
+
+
+func _build_topbar() -> void:
+	var bar := Panel.new()
+	bar.add_theme_stylebox_override("panel", UIKit.box(Color(0.20, 0.26, 0.33, 0.96), Color(0.12, 0.16, 0.21, 0.96), Color(1, 1, 1, 0.10), 0.0, 0.4))
+	bar.position = Vector2.ZERO
+	bar.size = Vector2(1920, TOP_H)
+	add_child(bar)
+	_topbar_home = Control.new()
+	_topbar_home.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bar.add_child(_topbar_home)
+	var rank := _lbl(str(Progress.rank + 1), 40, Color(0.75, 0.82, 0.9))
+	rank.position = Vector2(34, 18)
+	_topbar_home.add_child(rank)
+	var who := _lbl(Progress.rank_name().to_upper(), 24, INK)
+	who.add_theme_font_override("font", UIKit.font("caps"))
+	who.position = Vector2(92, 18)
+	_topbar_home.add_child(who)
+	var studio := _lbl("BROADSIDE  -  SQUATCH SQUAD STUDIOS", 13, DIM)
+	studio.add_theme_font_override("font", UIKit.font("caps"))
+	studio.position = Vector2(94, 56)
+	_topbar_home.add_child(studio)
+	_topbar_back = Button.new()
+	(_topbar_back as Button).text = "<   BACK"
+	(_topbar_back as Button).flat = true
+	(_topbar_back as Button).focus_mode = Control.FOCUS_NONE
+	(_topbar_back as Button).add_theme_font_override("font", UIKit.font("caps"))
+	(_topbar_back as Button).add_theme_font_size_override("font_size", 28)
+	(_topbar_back as Button).add_theme_color_override("font_color", Color(0.85, 0.9, 0.96))
+	_topbar_back.position = Vector2(20, 10)
+	_topbar_back.size = Vector2(260, TOP_H - 20)
+	(_topbar_back as Button).pressed.connect(_show_tab.bind(0))
+	bar.add_child(_topbar_back)
+	_topbar_title = _lbl("", 34, INK)
+	_topbar_title.add_theme_font_override("font", UIKit.font("caps"))
+	_topbar_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_topbar_title.position = Vector2(560, 22)
+	_topbar_title.size = Vector2(800, 50)
+	bar.add_child(_topbar_title)
+	var tb := _lbl("TEST BUILD  -  ALL SHIPS OPEN", 14, DIM)
+	tb.add_theme_font_override("font", UIKit.font("caps"))
+	tb.position = Vector2(1460, 38)
+	bar.add_child(tb)
+	_update_topbar()
+
+
+func _update_topbar() -> void:
+	if _topbar_home == null:
+		return
+	_topbar_home.visible = _tab == 0
+	_topbar_back.visible = _tab != 0
+	_topbar_title.text = PAGE_TITLES[_tab] if _tab < PAGE_TITLES.size() else ""
+
+
+func _toast_msg(t: String) -> void:
+	_toast.text = t
+	_toast.modulate.a = 1.0
+	_toast_t = 2.2
+
+
+func _shade(page: Control, y: float, h: float, top_dark: bool) -> void:
+	var gt := GradientTexture2D.new()
+	var gr := Gradient.new()
+	gr.colors = PackedColorArray([Color(0.02, 0.04, 0.07, 0.85 if top_dark else 0.0), Color(0.02, 0.04, 0.07, 0.0 if top_dark else 0.9)])
+	gt.gradient = gr
+	gt.fill_from = Vector2(0, 0)
+	gt.fill_to = Vector2(0, 1)
+	gt.width = 4
+	gt.height = 256
+	var tr := TextureRect.new()
+	tr.texture = gt
+	tr.stretch_mode = TextureRect.STRETCH_SCALE
+	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	tr.position = Vector2(0, y)
+	tr.size = Vector2(1920, h)
+	tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	page.add_child(tr)
+
+
+## A menu tile: dark square with a drawn icon, caps label beside it (left column).
+func _menu_tile(page: Control, pos: Vector2, label: String, icon: String, cb: Callable) -> void:
+	var b := Button.new()
+	b.focus_mode = Control.FOCUS_NONE
+	b.position = pos
+	b.size = Vector2(330, 84)
+	for st in ["normal", "pressed"]:
+		b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+	b.add_theme_stylebox_override("hover", UIKit.box(Color(1, 1, 1, 0.08), Color(1, 1, 1, 0.02), Color(0, 0, 0, 0), 10.0, 0.0))
+	b.pressed.connect(cb)
+	page.add_child(b)
+	var ic := Panel.new()
+	ic.add_theme_stylebox_override("panel", UIKit.box(Color(0.42, 0.50, 0.60, 0.92), Color(0.24, 0.30, 0.38, 0.92), Color(1, 1, 1, 0.25), 6.0, 0.5))
+	ic.position = Vector2(0, 0)
+	ic.size = Vector2(84, 84)
+	ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ic.draw.connect(_draw_icon.bind(ic, icon))
+	b.add_child(ic)
+	var l := _lbl(label, 28, Color(0.95, 0.97, 1.0))
+	l.add_theme_font_override("font", UIKit.font("caps"))
+	l.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
+	l.add_theme_constant_override("shadow_offset_y", 2)
+	l.position = Vector2(100, 22)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(l)
+
+
+func _draw_icon(ci: Control, kind: String) -> void:
+	var c := ci.size * 0.5
+	var w := Color(0.95, 0.97, 1.0, 0.95)
+	match kind:
+		"fleet":
+			ShipIcon.draw(ci, c + Vector2(0, 4), Vector2(1, 0), "heavy_cruiser", 70.0, w)
+		"yard":
+			ci.draw_rect(Rect2(c.x - 22, c.y + 14, 44, 8), w)
+			ci.draw_line(c + Vector2(-14, 14), c + Vector2(-14, -24), w, 4.0)
+			ci.draw_line(c + Vector2(-20, -22), c + Vector2(24, -22), w, 4.0)
+			ci.draw_line(c + Vector2(18, -22), c + Vector2(18, 0), w, 2.0)
+			ci.draw_rect(Rect2(c.x + 12, c.y, 12, 8), w)
+		"maps":
+			ci.draw_arc(c, 24, 0, TAU, 32, w, 3.0, true)
+			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(0, -20), c + Vector2(6, 0), c + Vector2(-6, 0)]), Color(1.0, 0.45, 0.4))
+			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(0, 20), c + Vector2(6, 0), c + Vector2(-6, 0)]), w)
+		"modes":
+			ci.draw_arc(c, 22, 0, TAU, 32, w, 3.0, true)
+			ci.draw_arc(c, 11, 0, TAU, 24, w, 3.0, true)
+			ci.draw_line(c + Vector2(-30, 0), c + Vector2(30, 0), w, 2.0)
+			ci.draw_line(c + Vector2(0, -30), c + Vector2(0, 30), w, 2.0)
+		"captain":
+			ci.draw_circle(c + Vector2(0, -6), 16, w)
+			ci.draw_rect(Rect2(c.x - 22, c.y - 26, 44, 9), Color(0.15, 0.2, 0.3))
+			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-28, 34), c + Vector2(-20, 12), c + Vector2(20, 12), c + Vector2(28, 34)]), w)
+
+
+func _slot(page: Control, pos: Vector2, text: String, cb: Callable, sz: float = 74.0) -> void:
+	var b := Button.new()
+	b.focus_mode = Control.FOCUS_NONE
+	b.position = pos
+	b.size = Vector2(sz, sz)
+	b.text = text
+	b.add_theme_font_override("font", UIKit.font("caps"))
+	b.add_theme_font_size_override("font_size", 13 if text.length() > 2 else 34)
+	b.add_theme_color_override("font_color", Color(0.85, 0.9, 0.96))
+	var bx := UIKit.box(Color(0.30, 0.36, 0.44, 0.88), Color(0.16, 0.20, 0.26, 0.9), Color(1, 1, 1, 0.22), 6.0, 0.5)
+	for st in ["normal", "pressed"]:
+		b.add_theme_stylebox_override(st, bx)
+	b.add_theme_stylebox_override("hover", UIKit.box(Color(0.38, 0.46, 0.56, 0.95), Color(0.2, 0.25, 0.32, 0.95), Color(UIKit.CYAN.r, UIKit.CYAN.g, UIKit.CYAN.b, 0.7), 6.0, 0.5))
+	b.pressed.connect(cb)
+	page.add_child(b)
+
+
+func _group_cap(page: Control, pos: Vector2, text: String) -> void:
+	var l := _lbl(text, 17, Color(0.95, 0.97, 1.0))
+	l.add_theme_font_override("font", UIKit.font("caps"))
+	l.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.9))
+	l.add_theme_constant_override("shadow_offset_y", 2)
+	l.position = pos
+	page.add_child(l)
+
+
+func _build_hangar() -> Control:
+	var page := Control.new()
+	page.position = Vector2.ZERO
+	page.size = Vector2(1920, 1080)
+	hangar_view = ShipViewer.new()
+	hangar_view.position = Vector2.ZERO
+	hangar_view.size = Vector2(1920, 1080)
+	hangar_view.auto_spin = false
+	hangar_view.yaw = -PI * 0.5 + 0.32
+	hangar_view.pitch = 0.10
+	hangar_view.add_harbor()
+	page.add_child(hangar_view)
+	_shade(page, TOP_H, 260, true)
+	_shade(page, 640, 440, false)
+	# Ship name and role (top centre-left).
+	hangar_name = _lbl("", 46, GOLD)
+	hangar_name.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.85))
+	hangar_name.add_theme_constant_override("shadow_offset_y", 3)
+	hangar_name.position = Vector2(420, TOP_H + 22)
+	page.add_child(hangar_name)
+	hangar_role = _lbl("", 18, UIKit.CYAN)
+	hangar_role.add_theme_font_override("font", UIKit.font("caps"))
+	hangar_role.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.85))
+	hangar_role.position = Vector2(424, TOP_H + 84)
+	page.add_child(hangar_role)
+	var det := _btn("SHIP DETAILS  >", func() -> void:
+		_show_tab(1)
+		_browse(GameSession.ship_id), UIKit.CYAN, 15)
+	det.position = Vector2(424, TOP_H + 118)
+	det.size = Vector2(220, 44)
+	page.add_child(det)
+	# Left menu.
+	var y := TOP_H + 24.0
+	for it in [["FLEET", "fleet", _show_tab.bind(1)], ["SHIPYARD", "yard", _show_tab.bind(2)], ["MAPS", "maps", _show_tab.bind(3)], ["BATTLE MODES", "modes", _show_tab.bind(4)]]:
+		_menu_tile(page, Vector2(24, y), it[0], it[1], it[2])
+		y += 100.0
+	# Captains & crew card.
+	_group_cap(page, Vector2(30, 668), "CAPTAIN & CREW")
+	var cap := Button.new()
+	cap.focus_mode = Control.FOCUS_NONE
+	cap.position = Vector2(24, 700)
+	cap.size = Vector2(190, 130)
+	var cbx := UIKit.box(Color(0.32, 0.40, 0.50, 0.92), Color(0.15, 0.2, 0.27, 0.92), Color(1, 1, 1, 0.25), 6.0, 0.5)
+	for st in ["normal", "pressed", "hover"]:
+		cap.add_theme_stylebox_override(st, cbx)
+	cap.pressed.connect(_toast_msg.bind("Captains & crew: coming next"))
+	cap.draw.connect(_draw_icon.bind(cap, "captain"))
+	page.add_child(cap)
+	# Loadout row: upgrades, ammunition, camouflage.
+	var lx := 250.0
+	_group_cap(page, Vector2(lx, 744), "UPGRADES")
+	var k := 0
+	for u in ["GUNS", "ARMOR", "ENGINE", "MODULE"]:
+		_slot(page, Vector2(lx + k * 82.0, 772), u, _toast_msg.bind("Upgrades: coming next"))
+		k += 1
+	lx += 4 * 82.0 + 40.0
+	_group_cap(page, Vector2(lx, 744), "AMMUNITION")
+	_slot(page, Vector2(lx, 772), "AP", _toast_msg.bind("Ammunition loadout: coming next"))
+	_slot(page, Vector2(lx + 82.0, 772), "HE", _toast_msg.bind("Ammunition loadout: coming next"))
+	lx += 2 * 82.0 + 40.0
+	_group_cap(page, Vector2(lx, 744), "CAMOUFLAGE")
+	_slot(page, Vector2(lx, 772), "+", _toast_msg.bind("Camouflage: coming next"))
+	_slot(page, Vector2(lx + 82.0, 772), "+", _toast_msg.bind("Camouflage: coming next"))
+	# Ship carousel.
+	var sc := ScrollContainer.new()
+	sc.position = Vector2(24, 862)
+	sc.size = Vector2(1430, 200)
+	sc.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	page.add_child(sc)
+	_car_box = HBoxContainer.new()
+	_car_box.add_theme_constant_override("separation", 10)
+	sc.add_child(_car_box)
+	_fill_carousel()
+	# Battle (bottom right) with the mode / map chip above it.
+	var mode := Button.new()
+	mode.focus_mode = Control.FOCUS_NONE
+	mode.position = Vector2(1476, 786)
+	mode.size = Vector2(420, 62)
+	var mbx := UIKit.box(Color(0.18, 0.24, 0.32, 0.92), Color(0.1, 0.14, 0.2, 0.92), Color(1, 1, 1, 0.2), 8.0, 0.4)
+	for st in ["normal", "pressed", "hover"]:
+		mode.add_theme_stylebox_override(st, mbx)
+	mode.pressed.connect(_show_tab.bind(4))
+	page.add_child(mode)
+	hangar_mode = _lbl("", 17, INK)
+	hangar_mode.add_theme_font_override("font", UIKit.font("caps"))
+	hangar_mode.position = Vector2(18, 18)
+	hangar_mode.size = Vector2(390, 26)
+	hangar_mode.clip_text = true
+	hangar_mode.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mode.add_child(hangar_mode)
+	var go := Button.new()
+	go.text = "BATTLE!"
+	go.focus_mode = Control.FOCUS_NONE
+	go.position = Vector2(1476, 862)
+	go.size = Vector2(420, 190)
+	go.add_theme_font_override("font", UIKit.font("head"))
+	go.add_theme_font_size_override("font_size", 64)
+	go.add_theme_color_override("font_color", Color.WHITE)
+	go.add_theme_color_override("font_hover_color", Color.WHITE)
+	var orange := Color(0.93, 0.36, 0.16)
+	go.add_theme_stylebox_override("normal", UIKit.box(orange.lightened(0.1), orange.darkened(0.25), Color(1, 1, 1, 0.35), 8.0, 0.6, Color(orange.r, orange.g, orange.b, 0.4), 10.0))
+	go.add_theme_stylebox_override("hover", UIKit.box(orange.lightened(0.25), orange.darkened(0.1), Color(1, 1, 1, 0.6), 8.0, 0.6, Color(orange.r, orange.g, orange.b, 0.6), 12.0))
+	go.add_theme_stylebox_override("pressed", UIKit.box(orange.darkened(0.2), orange.darkened(0.45), Color(1, 1, 1, 0.3), 8.0, 0.0))
+	go.pressed.connect(_launch)
+	page.add_child(go)
+	_toast = _lbl("", 24, INK)
+	_toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_toast.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.9))
+	_toast.add_theme_constant_override("shadow_offset_y", 2)
+	_toast.position = Vector2(560, 640)
+	_toast.size = Vector2(800, 40)
+	_toast.modulate.a = 0.0
+	page.add_child(_toast)
+	return page
+
+
+func _tier_of(e: Dictionary) -> int:
+	var list: Array = Roster.by_nation(String(e["nation"])).filter(func(x): return x["type"] == e["type"])
+	list.sort_custom(func(x, z): return ShipHistory.year(x) < ShipHistory.year(z) or (ShipHistory.year(x) == ShipHistory.year(z) and float(x["displacement_t"]) < float(z["displacement_t"])))
+	for i in list.size():
+		if list[i]["id"] == e["id"]:
+			return i + 1
+	return 1
+
+
+func _fill_carousel() -> void:
+	for c in _car_box.get_children():
+		c.queue_free()
+	_car_cards.clear()
+	var all: Array = Roster.available().filter(func(e): return Progress.ship_owned(String(e["id"])))
+	var navs: Array = Roster.nations()
+	navs.sort_custom(func(x, z): return (0 if x == "USA" else 1) < (0 if z == "USA" else 1) or ((x == "USA") == (z == "USA") and String(x) < String(z)))
+	all.sort_custom(func(x, z):
+		var nx := navs.find(x["nation"])
+		var nz := navs.find(z["nation"])
+		if nx != nz:
+			return nx < nz
+		return CLASS_ORDER.find(x["type"]) < CLASS_ORDER.find(z["type"]))
+	var numerals := ["I", "II", "III", "IV", "V"]
+	for e in all:
+		var id: String = e["id"]
+		var b := Button.new()
+		b.focus_mode = Control.FOCUS_NONE
+		b.custom_minimum_size = Vector2(270, 180)
+		b.pressed.connect(_pick_hangar_ship.bind(id))
+		b.draw.connect(_draw_card.bind(b, e, String(numerals[mini(_tier_of(e) - 1, 4)])))
+		for st in ["normal", "pressed", "hover"]:
+			b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+		_car_box.add_child(b)
+		_car_cards[id] = b
+
+
+func _draw_card(b: Button, e: Dictionary, tier: String) -> void:
+	var r := Rect2(Vector2.ZERO, b.size)
+	var nc := _nation_color(String(e["nation"]))
+	UIKit.fill_round(b, r, 6.0, nc.darkened(0.35), Color(0.06, 0.09, 0.13))
+	var font := UIKit.font("caps")
+	var fs := UIKit.font("semi")
+	# Diagonal flag-colour band, class silhouette, tier, role, name strip.
+	b.draw_colored_polygon(PackedVector2Array([Vector2(0, 0), Vector2(r.size.x * 0.55, 0), Vector2(r.size.x * 0.25, r.size.y * 0.7), Vector2(0, r.size.y * 0.7)]), Color(nc.r, nc.g, nc.b, 0.35))
+	ShipIcon.draw(b, Vector2(r.size.x * 0.58, r.size.y * 0.45), Vector2(1, 0), String(e["type"]), 150.0, Color(0.9, 0.93, 0.97, 0.9))
+	b.draw_string(font, Vector2(12, 30), "TIER " + tier, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, GOLD)
+	b.draw_string(font, Vector2(12, 52), String(CLASS_NAMES.get(String(e["type"]), "")), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.9, 0.93, 0.97, 0.85))
+	b.draw_rect(Rect2(0, r.size.y - 44, r.size.x, 44), Color(0.02, 0.04, 0.07, 0.82))
+	b.draw_string(fs, Vector2(12, r.size.y - 14), String(e["name"]).get_slice(" (", 0), HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 20, 20, Color.WHITE)
+	var sel := String(e["id"]) == GameSession.ship_id
+	if sel:
+		b.draw_rect(r.grow(-2), Color(0.35, 0.95, 0.45), false, 4.0)
+	else:
+		b.draw_rect(r.grow(-1), Color(1, 1, 1, 0.18), false, 2.0)
+
+
+func _pick_hangar_ship(id: String) -> void:
+	GameSession.ship_id = id
+	_refresh_selection()
+	_refresh_hangar()
+
+
+func _refresh_hangar() -> void:
+	if hangar_view == null:
+		return
+	var e := Roster.get_entry(GameSession.ship_id)
+	if e.is_empty():
+		return
+	if hangar_view.ship == null or hangar_view.get_meta("id", "") != GameSession.ship_id:
+		hangar_view.show_ship(e)
+		hangar_view.set_meta("id", GameSession.ship_id)
+		hangar_view.dist = hangar_view._len * 1.2
+		hangar_view._apply()
+	hangar_name.text = String(e["name"])
+	var r := ShipHistory.role(e)
+	hangar_role.text = "%s   -   %s  -  %s" % [String(r[0]), CLASS_NAMES.get(String(e["type"]), ""), String(e["nation"]).to_upper()]
+	var g := Battlegrounds.get_ground(GameSession.ground_id)
+	hangar_mode.text = "SKIRMISH  -  %s   >" % String(g.get("name", "")).to_upper()
+	for id in _car_cards:
+		(_car_cards[id] as Control).queue_redraw()
 
 
 # --- PLAY ---------------------------------------------------------------------
@@ -1088,6 +1456,9 @@ func _queue_thumbs() -> void:
 
 
 func _process(d: float) -> void:
+	if _toast != null and _toast_t > 0.0:
+		_toast_t -= d
+		_toast.modulate.a = clampf(_toast_t / 0.6, 0.0, 1.0)
 	if _shot_path != "":
 		_shot_t += d
 		if _shot_t > _shot_secs:
@@ -1316,5 +1687,8 @@ func _close_topo() -> void:
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE and overlay.visible:
-		_close_topo()
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		if overlay.visible:
+			_close_topo()
+		elif _tab != 0:
+			_show_tab(0)

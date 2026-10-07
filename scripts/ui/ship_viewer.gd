@@ -130,3 +130,48 @@ func _gui_input(event: InputEvent) -> void:
 		yaw -= mm.relative.x * 0.01
 		pitch = clampf(pitch + mm.relative.y * 0.006, -0.1, 1.2)
 		_apply()
+
+
+## Harbour backdrop for the Port home screen: quay, sheds, cranes and hills on the far (+X) side.
+func add_harbor() -> void:
+	var mat := func(c: Color) -> StandardMaterial3D:
+		var m := StandardMaterial3D.new()
+		m.albedo_color = c
+		m.roughness = 0.9
+		return m
+	var box := func(size: Vector3, pos: Vector3, c: Color) -> void:
+		var mi := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = size
+		mi.mesh = bm
+		mi.material_override = mat.call(c)
+		mi.position = pos
+		vp.add_child(mi)
+	var concrete := Color(0.46, 0.48, 0.5)
+	box.call(Vector3(160, 10, 5200), Vector3(820, 3, 0), concrete)                  # quay
+	box.call(Vector3(40, 2, 5200), Vector3(750, 0.5, 0), Color(0.2, 0.22, 0.24))   # quay edge shadow
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	var z := -2400.0
+	while z < 2400.0:
+		var w := rng.randf_range(90, 220)
+		var h := rng.randf_range(24, 70)
+		var tint := rng.randf_range(0.0, 1.0)
+		var col := Color(0.62, 0.64, 0.66).lerp(Color(0.55, 0.42, 0.34), tint * 0.5)
+		box.call(Vector3(rng.randf_range(80, 140), h, w), Vector3(980 + rng.randf_range(0, 120), h * 0.5 + 8, z + w * 0.5), col)
+		z += w + rng.randf_range(20, 90)
+	for cz in [-900.0, -300.0, 450.0, 1100.0]:
+		var cc := Color(0.20, 0.42, 0.62) if int(cz) % 2 == 0 else Color(0.85, 0.42, 0.18)
+		box.call(Vector3(10, 120, 10), Vector3(800, 68, cz), cc)
+		box.call(Vector3(10, 120, 10), Vector3(840, 68, cz), cc)
+		box.call(Vector3(150, 9, 9), Vector3(770, 128, cz), cc)
+	for k in 7:
+		var hz := -3600.0 + k * 1200.0
+		var hill := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = rng.randf_range(700, 1300)
+		sm.height = sm.radius * rng.randf_range(0.5, 0.8)
+		hill.mesh = sm
+		hill.material_override = mat.call(Color(0.24, 0.32, 0.27).lerp(Color(0.35, 0.40, 0.44), rng.randf()))
+		hill.position = Vector3(rng.randf_range(2600, 3600), 0, hz)
+		vp.add_child(hill)
