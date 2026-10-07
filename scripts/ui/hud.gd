@@ -472,11 +472,18 @@ func _layout() -> void:
 		var hel_h := 200.0
 		var deck_h := pad * 4.0 + btn_h + tel_h + hel_h
 		var yd := H - deck_h
-		var bw := (W - pad * 4.0) / 3.0
+		var bw := (W - pad * 3.0) / 2.0
 		_place(_cam_button, Vector2(pad, yd + pad), Vector2(bw, btn_h))
 		_place(_scope_button, Vector2(pad * 2.0 + bw, yd + pad), Vector2(bw, btn_h))
-		_place(_map_button, Vector2(pad * 3.0 + bw * 2.0, yd + pad), Vector2(bw, btn_h))
+		_map_button.visible = false
 		_scope_button.visible = true
+		# Portrait is kept sparse: no zoom buttons, event log, secondary nav cells or friendly nameplates.
+		_zin.visible = false
+		_zout.visible = false
+		_log_box.visible = false
+		_values["dyn"].visible = false
+		for k in ["steerage", "depth", "plat"]:
+			((_values[k] as Label).get_parent() as Control).visible = false
 		var yt := yd + pad * 2.0 + btn_h
 		_telegraph.k = minf(tel_w / 100.0, tel_h / 190.0)
 		_place(_telegraph, Vector2(pad, yt), Vector2(tel_w, tel_h))
@@ -508,22 +515,22 @@ func _layout() -> void:
 		_strip.position = Vector2(pad, 12.0 + 44.0 * _compass_sc + 8.0)
 		_strip.custom_minimum_size = Vector2(W - pad * 2.0, 0)
 		_strip.size = Vector2(W - pad * 2.0, 0)
-		var ydyn := _strip.position.y + 96.0
+		var ydyn := _strip.position.y + 90.0
 		_values["dyn"].position = Vector2(pad, ydyn)
 		_values["dyn"].custom_minimum_size = Vector2(W - pad * 2.0, 0)
-		var ymap := ydyn + 40.0
-		_mini.size = Vector2(300, 300)
+		var ymap := ydyn + 10.0
+		_mini.size = Vector2(260, 260)
 		_mini.position = Vector2(pad, ymap)
 		_place(_zin, Vector2(pad + 300.0 - 70.0, ymap + 6.0), Vector2(64, 64))
 		_place(_zout, Vector2(pad + 300.0 - 140.0, ymap + 6.0), Vector2(64, 64))
-		_alert_box.position = Vector2(pad * 2.0 + 300.0, ymap)
-		_alert_box.custom_minimum_size = Vector2(W - 300.0 - pad * 3.0, 0)
+		_alert_box.position = Vector2(pad * 2.0 + 260.0, ymap)
+		_alert_box.custom_minimum_size = Vector2(W - 260.0 - pad * 3.0, 0)
 		_log_box.position = Vector2(pad, yd - 54.0 - 215.0)
 		_log_box.custom_minimum_size = Vector2(W - pad * 2.0, 0)
 		_big.size = Vector2(W - pad * 2.0, W - pad * 2.0)
 		_big.position = Vector2(pad, 130)
 		_reticle_c = Vector2(W * 0.5, (ymap + yd - 60.0) * 0.5)
-		_covered = [Rect2(0, 0, W, ymap), Rect2(0, yd - 60.0, W, deck_h + 60.0), Rect2(pad, ymap, 300, 300)]
+		_covered = [Rect2(0, 0, W, ymap), Rect2(0, yd - 60.0, W, deck_h + 60.0), Rect2(pad, ymap, 260, 260)]
 	else:
 		var tk := 1.4 if touch else 1.0
 		var tel_x := W * 0.5 - (100.0 + 10.0 + 230.0) * tk * 0.5
@@ -668,6 +675,9 @@ func update_hud(aim_point: Vector3, mode_name: String, enemies: int, nearest: Sh
 	_t += get_process_delta_time()
 	camera_mode_name = mode_name
 	_mouse_aiming = mouse_aiming
+	if portrait:
+		_prop_tag.visible = (_values["prop"] as Label).text != "100%"
+		_steer_tag.visible = (_values["steer"] as Label).text != "100%"
 	_cam_button.text = ("CAMERA\n%s" % mode_name) if portrait else "CAMERA: %s  [C]" % mode_name
 	_scope_button.text = "SCOPE ON" if scope_on else "SCOPE"
 	_update_nav()
@@ -760,6 +770,8 @@ func _update_weapons(aim_point: Vector3, _enemies: int, _nearest: Ship) -> void:
 	var tof := gunnery.flight_time(aim_point)
 	var tof_txt := "" if tof < 0.0 else "  ToF %.1fs" % tof
 	_aim_text = "%d yd%s  %s" % [int(aim_d * 1.0936), tof_txt, btxt]
+	if portrait:
+		_aim_text = "%d yd%s" % [int(aim_d * 1.0936), tof_txt]
 	_aim_color = bcol
 
 
@@ -1023,6 +1035,8 @@ func _draw_plates() -> void:
 				covered = true
 		if covered or (_big != null and _big.visible):
 			continue
+		if portrait and (friend or s == ship):
+			continue
 		_plates.draw_set_transform(p * (1.0 - _pk), 0.0, Vector2(_pk, _pk))
 		var col := C_GOOD if friend else C_BAD
 		if s == ship:
@@ -1034,6 +1048,8 @@ func _draw_plates() -> void:
 			dist_txt = "  %d yd  %03d/%dkt" % [int(s.global_position.distance_to(ship.global_position) * 1.0936),
 				int(bearing_deg(s.heading)), int(absf(s.speed_ms) / 0.5144)]
 		var label := nm + dist_txt
+		if portrait:
+			label = "%d yd" % int(s.global_position.distance_to(ship.global_position) * 1.0936)
 		var ts := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12)
 		var w := maxf(ts.x + 26.0, 92.0)
 		var top := p + Vector2(-w * 0.5, -30.0)
