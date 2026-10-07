@@ -5,7 +5,7 @@ extends RefCounted
 
 static var _cache := {}
 
-const LAND_EXAG := 4.0       ## vertical exaggeration of land in the 3D topo view
+const LAND_EXAG := 3.0       ## vertical exaggeration of land in the 3D topo view
 const SEA_EXAG := 0.15       ## seabed is compressed so deep trenches don't swallow the view
 
 

@@ -48,6 +48,8 @@ var _thumb_queue: Array[int] = []
 var overlay: Control
 var topo: TopoView
 var topo_info: Label
+var topo_pct: Label
+var topo_bar: Panel
 var topo_gid := ""
 var vis_btn: Button
 
@@ -654,95 +656,153 @@ func _open_topo(gid: String) -> void:
 	overlay.add_child(wait)
 	await get_tree().process_frame
 	await get_tree().process_frame
+	# map card: opaque rounded panel that clips the 3D view to its corners
+	var holder := Panel.new()
+	holder.add_theme_stylebox_override("panel", UIKit.box(Color(0.03, 0.05, 0.09, 1), Color(0.03, 0.05, 0.09, 1), Color(0, 0, 0, 0), 20.0, 0.9, Color(0, 0, 0, 0), 0.0))
+	holder.position = Vector2(24, 24)
+	holder.size = Vector2(1316, 1032)
+	holder.clip_children = CanvasItem.CLIP_CHILDREN_AND_DRAW
+	overlay.add_child(holder)
 	topo = TopoView.new()
-	topo.position = Vector2(30, 30)
-	topo.size = Vector2(1290, 1020)
-	overlay.add_child(topo)
+	topo.position = Vector2.ZERO
+	topo.size = holder.size
+	holder.add_child(topo)
 	topo.setup(g)
 	topo.observer_changed.connect(func(_p): _update_topo_info())
 	wait.queue_free()
 	var frame := Panel.new()
-	frame.add_theme_stylebox_override("panel", UIKit.box(Color(0, 0, 0, 0), Color(0, 0, 0, 0), Color(GOLD.r, GOLD.g, GOLD.b, 0.6), 14.0, 0.0, Color(GOLD.r, GOLD.g, GOLD.b, 0.18), 0.0))
-	frame.position = topo.position
-	frame.size = topo.size
+	frame.add_theme_stylebox_override("panel", UIKit.box(Color(0, 0, 0, 0), Color(0, 0, 0, 0), Color(1, 1, 1, 0.22), 20.0, 0.0, Color(UIKit.CYAN.r, UIKit.CYAN.g, UIKit.CYAN.b, 0.10), 0.0))
+	frame.position = holder.position
+	frame.size = holder.size
 	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	overlay.add_child(frame)
-	# side panel
+	# ---- side panel ----
 	var side := Panel.new()
-	side.add_theme_stylebox_override("panel", UIKit.glass(18.0, 0.7))
-	side.position = Vector2(1336, 30)
-	side.size = Vector2(556, 1020)
+	side.add_theme_stylebox_override("panel", UIKit.glass(20.0, 0.8))
+	side.position = Vector2(1356, 24)
+	side.size = Vector2(540, 1032)
 	overlay.add_child(side)
-	var t := _lbl(String(g["name"]), 28, GOLD, true)
-	t.position = Vector2(20, 14)
-	t.size = Vector2(516, 80)
+	var t := _lbl(String(g["name"]), 30, GOLD, true)
+	t.position = Vector2(24, 18)
+	t.size = Vector2(492, 80)
 	side.add_child(t)
-	var d := _lbl("%s  -  %s" % [g["date"], String(g.get("weather", "clear")).capitalize()], 16, DIM)
-	d.position = Vector2(22, 90)
-	side.add_child(d)
-	var bl := _lbl(String(g["blurb"]), 16, Color(0.82, 0.87, 0.92), true)
-	bl.position = Vector2(22, 120)
-	bl.size = Vector2(512, 80)
+	var tod := "Night" if float(g["time_of_day"]) < 5.0 or float(g["time_of_day"]) > 20.0 else ("Dawn" if float(g["time_of_day"]) < 8.0 else ("Dusk" if float(g["time_of_day"]) > 16.5 else "Day"))
+	var cx := 24.0
+	for chip in [String(g["date"]), String(g.get("weather", "clear")).capitalize(), tod]:
+		var cw := UIKit.font("body").get_string_size(chip, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 22.0
+		var cp := Panel.new()
+		cp.add_theme_stylebox_override("panel", UIKit.box(Color(1, 1, 1, 0.10), Color(1, 1, 1, 0.05), Color(1, 1, 1, 0.14), 12.0, 0.0, Color(0, 0, 0, 0), 0.0))
+		cp.position = Vector2(cx, 96)
+		cp.size = Vector2(cw, 26)
+		side.add_child(cp)
+		var cl := _lbl(chip, 13, Color(0.78, 0.86, 0.96))
+		cl.position = Vector2(11, 3)
+		cp.add_child(cl)
+		cx += cw + 8.0
+	var bl := _lbl(String(g["blurb"]), 15, Color(0.82, 0.87, 0.93), true)
+	bl.position = Vector2(24, 136)
+	bl.size = Vector2(492, 70)
 	side.add_child(bl)
-	# legend + waypoint list
-	var y := 215.0
-	var sh := _lbl("LANDMARKS", 15, GOLD)
-	sh.position = Vector2(22, y)
-	side.add_child(sh)
-	y += 26.0
-	for wp in Battlegrounds.waypoints(gid):
-		var sw := Panel.new()
+	# landmarks card
+	var wps: Array = Battlegrounds.waypoints(gid)
+	var lcard := Panel.new()
+	lcard.add_theme_stylebox_override("panel", UIKit.box(Color(1, 1, 1, 0.045), Color(1, 1, 1, 0.02), Color(1, 1, 1, 0.10), 14.0, 0.0, Color(0, 0, 0, 0), 0.0))
+	lcard.position = Vector2(18, 214)
+	lcard.size = Vector2(504, 52 + wps.size() * 32)
+	side.add_child(lcard)
+	var lh := _lbl("LANDMARKS  -  click to fly there", 11, DIM)
+	lh.add_theme_font_override("font", UIKit.font("caps"))
+	lh.position = Vector2(18, 14)
+	lcard.add_child(lh)
+	var ry := 40.0
+	for wp in wps:
+		var rb := Button.new()
+		rb.flat = true
+		rb.focus_mode = Control.FOCUS_NONE
+		rb.position = Vector2(8, ry)
+		rb.size = Vector2(488, 30)
+		var hov := UIKit.box(Color(1, 1, 1, 0.08), Color(1, 1, 1, 0.04), Color(0, 0, 0, 0), 8.0, 0.0, Color(0, 0, 0, 0), 0.0)
+		rb.add_theme_stylebox_override("hover", hov)
+		rb.add_theme_stylebox_override("pressed", hov)
+		rb.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
+		var wpp: Vector2 = wp["p"]
+		rb.pressed.connect(func(): if topo != null: topo.focus(wpp))
+		lcard.add_child(rb)
 		var kc := MapData.kind_color(wp["k"])
-		sw.add_theme_stylebox_override("panel", UIKit.box(kc, kc.darkened(0.25), Color(1, 1, 1, 0.5), 6.0, 0.0, Color(kc.r, kc.g, kc.b, 0.5), 0.0))
-		sw.position = Vector2(24, y + 5)
-		sw.size = Vector2(13, 13)
-		side.add_child(sw)
-		var wl := _lbl("%s   (%s)" % [wp["n"], MapData.kind_label(wp["k"])], 15, INK)
-		wl.position = Vector2(46, y)
-		side.add_child(wl)
-		y += 25.0
-	y += 14.0
-	var cv := _lbl("COVER AND CONCEALMENT", 15, GOLD)
-	cv.position = Vector2(22, y)
-	side.add_child(cv)
-	y += 26.0
-	var ex := _lbl("Click anywhere on the map to place a spotter (25 m eye height).\nAmber = in his line of sight. Dark = hidden behind land: cover for ships to hide and ambush.\nContours: land every 50 m; shallow water every 10 m (shoals).", 14, Color(0.78, 0.84, 0.9), true)
-	ex.position = Vector2(22, y)
-	ex.size = Vector2(512, 100)
-	side.add_child(ex)
-	y += 108.0
-	topo_info = _lbl("", 16, Color(1.0, 0.9, 0.6), true)
-	topo_info.position = Vector2(22, y)
-	topo_info.size = Vector2(512, 70)
-	side.add_child(topo_info)
+		var sw := Panel.new()
+		sw.add_theme_stylebox_override("panel", UIKit.box(kc.lightened(0.1), kc.darkened(0.25), Color(1, 1, 1, 0.5), 7.0, 0.0, Color(kc.r, kc.g, kc.b, 0.55), 0.0))
+		sw.position = Vector2(10, 9)
+		sw.size = Vector2(12, 12)
+		sw.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		rb.add_child(sw)
+		var wl := _lbl(String(wp["n"]), 15, INK)
+		wl.position = Vector2(32, 4)
+		wl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		rb.add_child(wl)
+		var kl := _lbl(MapData.kind_label(wp["k"]).to_upper(), 10, DIM)
+		kl.add_theme_font_override("font", UIKit.font("caps"))
+		kl.position = Vector2(488 - 8 - UIKit.font("caps").get_string_size(MapData.kind_label(wp["k"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x - 4, 8)
+		kl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		rb.add_child(kl)
+		ry += 32.0
+	# spotter card
+	var sy := lcard.position.y + lcard.size.y + 14.0
+	var scard := Panel.new()
+	scard.add_theme_stylebox_override("panel", UIKit.box(Color(0.30, 0.22, 0.08, 0.55), Color(0.12, 0.09, 0.04, 0.55), Color(UIKit.GOLD.r, UIKit.GOLD.g, UIKit.GOLD.b, 0.45), 14.0, 0.0, Color(0, 0, 0, 0), 0.0))
+	scard.position = Vector2(18, sy)
+	scard.size = Vector2(504, 176)
+	side.add_child(scard)
+	var sh := _lbl("SPOTTER EXPOSURE", 11, UIKit.GOLD)
+	sh.add_theme_font_override("font", UIKit.font("caps"))
+	sh.position = Vector2(18, 14)
+	scard.add_child(sh)
+	topo_pct = _lbl("--", 56, Color("ffe2a0"))
+	topo_pct.position = Vector2(16, 28)
+	scard.add_child(topo_pct)
+	var of := _lbl("of the open water is in his line of sight", 13, DIM)
+	of.position = Vector2(150, 62)
+	of.size = Vector2(340, 40)
+	of.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	scard.add_child(of)
+	var track := Panel.new()
+	track.add_theme_stylebox_override("panel", UIKit.box(Color(0, 0, 0, 0.35), Color(0, 0, 0, 0.35), Color(1, 1, 1, 0.08), 6.0, 0.0, Color(0, 0, 0, 0), 0.0))
+	track.position = Vector2(18, 106)
+	track.size = Vector2(468, 12)
+	scard.add_child(track)
+	topo_bar = Panel.new()
+	topo_bar.add_theme_stylebox_override("panel", UIKit.box(Color("ffd77a"), Color("e8962a"), Color(0, 0, 0, 0), 6.0, 0.0, Color(UIKit.GOLD.r, UIKit.GOLD.g, UIKit.GOLD.b, 0.4), 0.0))
+	topo_bar.position = Vector2(18, 106)
+	topo_bar.size = Vector2(10, 12)
+	scard.add_child(topo_bar)
+	topo_info = _lbl("", 14, Color(1.0, 0.9, 0.65), true)
+	topo_info.position = Vector2(18, 128)
+	topo_info.size = Vector2(468, 40)
+	scard.add_child(topo_info)
 	_update_topo_info()
-	vis_btn = _btn("CONCEALMENT OVERLAY: ON", _toggle_vis, Color(1.0, 0.72, 0.15), 17)
-	vis_btn.position = Vector2(22, 790)
-	vis_btn.size = Vector2(512, 46)
+	var hint := _lbl("Click the map to move the spotter. Dark violet = hidden behind land: cover for an ambush.", 13, DIM, true)
+	hint.position = Vector2(24, sy + 188.0)
+	hint.size = Vector2(492, 40)
+	side.add_child(hint)
+	# controls
+	vis_btn = _btn("CONCEALMENT OVERLAY: ON", _toggle_vis, Color(1.0, 0.72, 0.15), 15)
+	vis_btn.position = Vector2(18, 846)
+	vis_btn.size = Vector2(504, 48)
 	side.add_child(vis_btn)
-	var zi := _btn("ZOOM +", func(): topo.zoom(0.8), GOLD.darkened(0.2), 17)
-	zi.position = Vector2(22, 846)
-	zi.size = Vector2(160, 42)
-	side.add_child(zi)
-	var zo := _btn("ZOOM -", func(): topo.zoom(1.25), GOLD.darkened(0.2), 17)
-	zo.position = Vector2(194, 846)
-	zo.size = Vector2(160, 42)
-	side.add_child(zo)
-	var rs := _btn("RESET", func(): topo.reset_camera(), GOLD.darkened(0.2), 17)
-	rs.position = Vector2(366, 846)
-	rs.size = Vector2(168, 42)
-	side.add_child(rs)
-	var dep := _primary(_btn("USE FOR SKIRMISH", _use_map, Color(0.4, 0.9, 0.5), 20), Color("4ade80"))
-	dep.position = Vector2(22, 900)
-	dep.size = Vector2(300, 56)
+	var bw := (504.0 - 24.0) / 3.0
+	var ctl := [["ZOOM +", func(): topo.zoom(0.8)], ["ZOOM -", func(): topo.zoom(1.25)], ["RESET VIEW", func(): topo.reset_camera()]]
+	for k in 3:
+		var cb := _btn(ctl[k][0], ctl[k][1], UIKit.CYAN, 14)
+		cb.position = Vector2(18 + k * (bw + 12), 904)
+		cb.size = Vector2(bw, 44)
+		side.add_child(cb)
+	var dep := _primary(_btn("USE FOR SKIRMISH", _use_map, Color(0.4, 0.9, 0.5), 18), Color("4ade80"))
+	dep.position = Vector2(18, 962)
+	dep.size = Vector2(304, 54)
 	side.add_child(dep)
-	var cl := _btn("CLOSE", _close_topo, Color("fb6a5e"), 20)
-	cl.position = Vector2(334, 900)
-	cl.size = Vector2(200, 56)
+	var cl := _btn("CLOSE", _close_topo, Color("fb6a5e"), 18)
+	cl.position = Vector2(334, 962)
+	cl.size = Vector2(188, 54)
 	side.add_child(cl)
-	var tip := _lbl("drag to orbit  -  wheel to zoom", 13, DIM)
-	tip.position = Vector2(22, 970)
-	side.add_child(tip)
 
 
 func _update_topo_info() -> void:
@@ -755,7 +815,10 @@ func _update_topo_info() -> void:
 		if dd < best:
 			best = dd
 			near = wp["n"]
-	topo_info.text = "Spotter near %s (%.1f km).  Sees %d%% of the open water." % [near, best / 1000.0, int(topo.exposed_water_pct())]
+	var pct := topo.exposed_water_pct()
+	topo_pct.text = "%d%%" % int(pct)
+	topo_bar.size.x = maxf(468.0 * pct / 100.0, 10.0)
+	topo_info.text = "Spotter near %s (%.1f km away)" % [near, best / 1000.0]
 
 
 func _toggle_vis() -> void:
