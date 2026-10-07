@@ -5,7 +5,8 @@ extends Node3D
 ## PC: hold RMB + move to orbit, wheel zooms, the cursor aims.  Touch: one-finger drag orbits,
 ## pinch zooms, tap designates the aim point.  [ / ] cycle your ship. F1-F7 pick a battleground.
 
-const OPPONENTS := 30
+const TEAM_SIZE := 15            ## ships per side: the player plus 14 AI allies against 15 AI opponents
+const OPPONENTS := TEAM_SIZE
 
 @export var ground_id := "surigao_strait"
 var player_index := 0
@@ -165,11 +166,20 @@ func _spawn_fleet() -> void:
 	# Test option: --allies N adds N AI-controlled ships on the player's side.
 	var cl := OS.get_cmdline_user_args()
 	var ai_i := cl.find("--allies")
+	var n_allies := TEAM_SIZE - 1
+	if peace:
+		n_allies = 0
 	if ai_i >= 0 and ai_i + 1 < cl.size():
-		for i in int(cl[ai_i + 1]):
+		n_allies = int(cl[ai_i + 1])
+	if n_allies > 0:
+		for i in n_allies:
 			var cls_a: String = pool_a[(i + 1) % pool_a.size()]
 			var off_a := Vector3((i % 6 - 2.5) * 650.0, 0, 650.0 + (i / 6) * 650.0)
 			_spawn(cls_a, 0, _find_water((ground["spawn_a"] as Vector3) + off_a), false)
+	var cnt := [0, 0]
+	for n in get_tree().get_nodes_in_group("ships"):
+		cnt[clampi((n as Ship).team, 0, 1)] += 1
+	print("Fleets: team 0 = %d ships, team 1 = %d ships" % [cnt[0], cnt[1]])
 	if OS.get_cmdline_user_args().has("--auto"):
 		controls.set_physics_process(false)     # the AI captain drives the player ship in tests
 		var ai := AICaptain.new()
