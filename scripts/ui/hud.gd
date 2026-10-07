@@ -104,7 +104,7 @@ func _decide_mode() -> void:
 	var win := get_window()
 	var ws := Vector2(win.size)
 	touch = DisplayServer.is_touchscreen_available() or OS.get_cmdline_user_args().has("--touchui")
-	portrait = ws.y > ws.x * 1.05
+	portrait = false                    # landscape only (MobileMode covers an upright phone)
 	win.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_EXPAND
 	win.content_scale_size = Vector2i(1080, 1920) if portrait else Vector2i(1920, 1080)
 	_fk = 1.6 if portrait else (1.25 if touch else 1.0)
@@ -387,7 +387,7 @@ func _build_controls() -> void:
 	for o in EngineTelegraph.ENGINE_ORDERS:
 		el.append(String(o[0]).replace("AHEAD ", "").replace("ASTERN ", "").replace("ALL ASTERN", "ALL"))
 		ec.append(C_GOOD if float(o[1]) > 0.0 else (C_DIM if float(o[1]) == 0.0 else C_BAD))
-	_telegraph = DetentGauge.new()
+	_telegraph = EngineDial.new()
 	_telegraph.size = Vector2(100, 190)
 	_telegraph.position = Vector2(960.0 - 170.0, 1080.0 - 12.0 - 190.0)
 	add_child(_telegraph)
@@ -398,7 +398,7 @@ func _build_controls() -> void:
 	var hc: Array[Color] = []
 	for o in EngineTelegraph.HELM_ORDERS:
 		hc.append(C_BAD if float(o[1]) > 0.0 else (C_DIM if float(o[1]) == 0.0 else C_GOOD))
-	_helm = DetentGauge.new()
+	_helm = HelmWheel.new()
 	_helm.size = Vector2(230, 68)
 	_helm.position = Vector2(960.0 - 170.0 + 100.0 + 10.0, 1080.0 - 12.0 - 68.0)
 	add_child(_helm)
@@ -423,17 +423,17 @@ func _build_controls() -> void:
 		scope_changed.emit(scope_on))
 	_scope_button.add_theme_font_size_override("font_size", roundi(18 * _fk))
 	_set_btn_colors(_scope_button, C_NAV, scope_on)
-	_eng_up = _btn("▲\nFASTER", Vector2(100, 100), Vector2.ZERO, C_GOOD)
+	_eng_up = _btn("▲", Vector2(100, 100), Vector2.ZERO, C_GOOD)
 	_eng_up.pressed.connect(func() -> void: controls.step_engine(1))
-	_eng_dn = _btn("▼\nSLOWER", Vector2(100, 100), Vector2.ZERO, C_BAD)
+	_eng_dn = _btn("▼", Vector2(100, 100), Vector2.ZERO, C_BAD)
 	_eng_dn.pressed.connect(func() -> void: controls.step_engine(-1))
 	_helm_l = _btn("◄\nPORT", Vector2(100, 100), Vector2.ZERO, C_BAD)
 	_helm_l.pressed.connect(func() -> void: controls.step_helm(1))
 	_helm_r = _btn("►\nSTBD", Vector2(100, 100), Vector2.ZERO, C_GOOD)
 	_helm_r.pressed.connect(func() -> void: controls.step_helm(-1))
 	for b in [_eng_up, _eng_dn, _helm_l, _helm_r]:
-		(b as Button).visible = touch or portrait
-		(b as Button).add_theme_font_size_override("font_size", roundi(20 * _fk))
+		(b as Button).visible = true
+		(b as Button).add_theme_font_size_override("font_size", roundi((36 if (b == _eng_up or b == _eng_dn) else 20) * _fk))
 	_map_button = _btn("MAP", Vector2(190, 50), Vector2(0, 0), C_NAV)
 	_map_button.visible = portrait
 	_map_button.pressed.connect(toggle_map)
@@ -467,8 +467,8 @@ func _layout() -> void:
 	_profile.scale = Vector2.ONE
 	if portrait:
 		var btn_h := 104.0
-		var tel_w := 250.0
-		var tel_h := 470.0
+		var tel_w := 380.0
+		var tel_h := 390.0
 		var hel_h := 200.0
 		var deck_h := pad * 4.0 + btn_h + tel_h + hel_h
 		var yd := H - deck_h
@@ -485,13 +485,13 @@ func _layout() -> void:
 		for k in ["steerage", "depth", "plat"]:
 			((_values[k] as Label).get_parent() as Control).visible = false
 		var yt := yd + pad * 2.0 + btn_h
-		_telegraph.k = minf(tel_w / 100.0, tel_h / 190.0)
+		_telegraph.k = tel_w / 190.0
 		_place(_telegraph, Vector2(pad, yt), Vector2(tel_w, tel_h))
-		var sb_w := 130.0
+		var sb_w := 100.0
 		_place(_eng_up, Vector2(pad * 2.0 + tel_w, yt), Vector2(sb_w, (tel_h - pad) * 0.5))
 		_place(_eng_dn, Vector2(pad * 2.0 + tel_w, yt + (tel_h + pad) * 0.5), Vector2(sb_w, (tel_h - pad) * 0.5))
 		var fire_w := W - pad * 4.0 - tel_w - sb_w
-		var ps := minf(1.4, fire_w / ShipProfile.W)
+		var ps := minf(1.25, fire_w / ShipProfile.W)
 		var prof_h := ShipProfile.H * ps
 		var fire_h := tel_h - prof_h - pad
 		var xf := pad * 3.0 + tel_w + sb_w
@@ -533,20 +533,26 @@ func _layout() -> void:
 		_covered = [Rect2(0, 0, W, ymap), Rect2(0, yd - 60.0, W, deck_h + 60.0), Rect2(pad, ymap, 260, 260)]
 	else:
 		var tk := 1.4 if touch else 1.0
-		var tel_x := W * 0.5 - (100.0 + 10.0 + 230.0) * tk * 0.5
-		_telegraph.k = tk
-		_place(_telegraph, Vector2(tel_x, H - 12.0 - 190.0 * tk), Vector2(100.0 * tk, 190.0 * tk))
-		_helm.k = tk
-		_place(_helm, Vector2(tel_x + 110.0 * tk, H - 12.0 - 68.0 * tk), Vector2(230.0 * tk, 68.0 * tk))
-		_prop_tag.position = Vector2(tel_x, H - 12.0 - 190.0 * tk - 34.0)
-		_prop_tag.custom_minimum_size = Vector2(100.0 * tk, 0)
-		_steer_tag.position = Vector2(tel_x + 110.0 * tk, H - 12.0 - 68.0 * tk - 34.0)
-		_steer_tag.custom_minimum_size = Vector2(230.0 * tk, 0)
 		var sbw := 74.0
-		_place(_eng_up, Vector2(tel_x - sbw - 8.0, H - 12.0 - 190.0 * tk), Vector2(sbw, 92.0 * tk))
-		_place(_eng_dn, Vector2(tel_x - sbw - 8.0, H - 12.0 - 190.0 * tk + 98.0 * tk), Vector2(sbw, 92.0 * tk))
-		_place(_helm_l, Vector2(tel_x + 340.0 * tk + 8.0, H - 12.0 - 68.0 * tk), Vector2(sbw, 68.0 * tk))
-		_place(_helm_r, Vector2(tel_x + 340.0 * tk + 16.0 + sbw, H - 12.0 - 68.0 * tk), Vector2(sbw, 68.0 * tk))
+		var gap := 8.0
+		# Bottom row, centred: [engine up/down] [telegraph dial] [port] [helm wheel] [starboard]
+		var total := sbw + gap + 190.0 * tk + 22.0 + sbw + gap + 190.0 * tk + gap + sbw
+		var x0 := W * 0.5 - total * 0.5
+		var yb := H - 12.0 - 190.0 * tk
+		_place(_eng_up, Vector2(x0, yb), Vector2(sbw, 92.0 * tk))
+		_place(_eng_dn, Vector2(x0, yb + 98.0 * tk), Vector2(sbw, 92.0 * tk))
+		var tel_x := x0 + sbw + gap
+		_telegraph.k = tk
+		_place(_telegraph, Vector2(tel_x, yb), Vector2(190.0 * tk, 190.0 * tk))
+		var hx := tel_x + 190.0 * tk + 22.0
+		_place(_helm_l, Vector2(hx, yb), Vector2(sbw, 190.0 * tk))
+		_helm.k = tk
+		_place(_helm, Vector2(hx + sbw + gap, yb), Vector2(190.0 * tk, 190.0 * tk))
+		_place(_helm_r, Vector2(hx + sbw + gap + 190.0 * tk + gap, yb), Vector2(sbw, 190.0 * tk))
+		_prop_tag.position = Vector2(tel_x, yb - 34.0)
+		_prop_tag.custom_minimum_size = Vector2(190.0 * tk, 0)
+		_steer_tag.position = Vector2(hx + sbw + gap, yb - 34.0)
+		_steer_tag.custom_minimum_size = Vector2(190.0 * tk, 0)
 		var fs := 1.3 if touch else 1.0
 		var fw := 190.0 * fs
 		var fh := 120.0 * fs
@@ -575,7 +581,7 @@ func _layout() -> void:
 		_big.size = Vector2(830, 830)
 		_big.position = Vector2(W * 0.5 - 415.0, 36)
 		_reticle_c = V * 0.5
-		_covered = [Rect2(W * 0.5 - 260.0, 0, 520, 120), Rect2(W - 230.0, 0, 230, 125), Rect2(tel_x - 10.0, H - 280.0, 360.0 * tk, 280.0),
+		_covered = [Rect2(W * 0.5 - 260.0, 0, 520, 120), Rect2(W - 230.0, 0, 230, 125), Rect2(x0 - 10.0, H - 290.0, total + 20.0, 290.0),
 			Rect2(0, H - 320.0, 320, 320), Rect2(W - 400.0 - (fw if touch else 0.0), H - 190.0, 400.0 + (fw if touch else 0.0), 190.0)]
 
 
