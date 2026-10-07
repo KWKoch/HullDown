@@ -203,3 +203,47 @@ const WAYPOINTS := {
 
 func waypoints(id: String) -> Array:
 	return WAYPOINTS.get(id, [])
+
+
+## Where each ground may be fought. Measured with tools/map_metrics.tscn (km2 of water at least
+## 1.2 km off any shore that a battleship can float in): the open grounds give a 15 v 15 fleet room
+## to manoeuvre; the close-quarters ones are too cramped or shallow for a ladder match, so they are
+## Story Mode grounds, unlocked by commission rank the way a commander would earn the command.
+## "rank" is the rank index in RANKS at which Story Mode opens the ground.
+const RANKS := ["Lieutenant", "Lieutenant Commander", "Commander", "Captain", "Commodore"]
+const MODE_INFO := {
+	"surigao_strait": {"pvp": true},
+	"savo_island": {"pvp": true},
+	"sunda_strait": {"pvp": true},
+	"mers_el_kebir": {"pvp": true},
+	"narvik": {"pvp": false, "rank": 1, "why": "Fjord: under 11 km2 of open water; destroyer-flotilla action",
+		"chapter": "Story: the Narvik destroyer flotilla"},
+	"river_plate": {"pvp": false, "rank": 2, "why": "Shallow estuary: no deep water for capital ships; cruiser-squadron action",
+		"chapter": "Story: the hunt for the raider"},
+	"normandy_omaha": {"pvp": false, "rank": 3, "why": "Shoals under the cliffs: bombardment group, not a fleet duel",
+		"chapter": "Story: the bombardment group"},
+}
+
+
+## Swell on the water, 0 flat .. 5 rough (drives ship roll/pitch, see Hydro).
+const SEA_STATE := {"surigao_strait": 1.0, "savo_island": 2.0, "river_plate": 3.0, "narvik": 2.0,
+	"sunda_strait": 2.0, "mers_el_kebir": 1.0, "normandy_omaha": 4.0}
+
+
+func sea_state(id: String) -> float:
+	return float(SEA_STATE.get(id, 1.5))
+
+
+func is_pvp(id: String) -> bool:
+	return bool(MODE_INFO.get(id, {}).get("pvp", true))
+
+
+func unlock_rank(id: String) -> int:
+	return int(MODE_INFO.get(id, {}).get("rank", 0))
+
+
+func unlock_text(id: String) -> String:
+	var m: Dictionary = MODE_INFO.get(id, {})
+	if m.get("pvp", true):
+		return ""
+	return "Unlocks at %s  -  %s" % [RANKS[int(m["rank"])], m["chapter"]]

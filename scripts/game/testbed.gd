@@ -216,6 +216,7 @@ func _spawn(class_id: String, team: int, pos: Vector3, is_player: bool) -> Ship:
 	add_child(s)
 	s.setup_from_class(entry, team)
 	s.terrain = terrain
+	s.sea_state = Battlegrounds.sea_state(ground_id)
 	s.is_player = is_player
 	s.crew_skill = 1.0 if is_player else randf_range(0.7, 1.3)    # AI crews vary in efficacy
 	if s.dc != null:

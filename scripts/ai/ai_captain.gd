@@ -268,7 +268,8 @@ func _steer(delta: float) -> void:
 	desired = _avoid_ships(desired, delta)
 	desired = _avoid_terrain(desired)
 	var err := wrapf(desired - ship.heading, -PI, PI)
-	ship.rudder = clampf(err * 2.0, -1.0, 1.0)
+	# Lead the helm: a hull keeps swinging after the rudder is eased, so damp with the yaw rate.
+	ship.rudder = clampf(err * 2.0 - (ship.hydro.r * 7.0 if ship.hydro != null else 0.0), -1.0, 1.0)
 	ship.throttle = clampf(thr, -0.3, 1.0)
 
 

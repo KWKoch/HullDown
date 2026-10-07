@@ -147,8 +147,13 @@ func fire_at(target_pos: Vector3, target_vel: Vector3) -> int:
 		if aim == Vector3.ZERO:
 			continue
 		var barrels: int = gun.get("barrels_per_turret", 1)
+		# Deck motion the stable element does not remove goes straight into the shot; the muzzle blast kicks the hull.
+		var psi := arc_center(turret) + float(train[t])
+		var plat := ship.hydro.gun_elevation_error(psi) if ship.hydro != null else 0.0
 		for b in barrels:
-			_spawn_shell(muzzle, aim, turret)
+			_spawn_shell(muzzle, aim, turret, 0.0, 0.0, plat)
+		if ship.hydro != null:
+			ship.hydro.recoil(sin(psi), barrels * float(gun["shell_kg"]) * float(gun["muzzle_ms"]))
 		Fx.muzzle(ship, muzzle, aim, float(gun.get("caliber_mm", 100.0)))
 		# A damaged turret reloads slower; rpm is per barrel salvo.
 		var base := reload_seconds()
@@ -191,7 +196,7 @@ func dispersion_sigma(range_m: float) -> Vector2:
 		n += 1.0
 		live += (t as Compartment).health_fraction() if (t as Compartment).is_functional() else 0.0
 	var wear := 1.0 + (1.0 - (live / maxf(n, 1.0))) + 3.0 * absf(ship.list_rad)
-	var k := motion * wear
+	var k := motion * wear * (ship.hydro.scatter_factor() if ship.hydro != null else 1.0)
 	return Vector2(range_m * 0.0069, range_m * 0.0036) * k
 
 
@@ -315,16 +320,17 @@ func clear_of_friendlies(target_pos: Vector3, target_vel: Vector3, offsets: Dict
 	return true
 
 
-func _spawn_shell(muzzle: Vector3, dir: Vector3, turret: Compartment, salvo_yaw: float = 0.0, salvo_pitch: float = 0.0) -> void:
+func _spawn_shell(muzzle: Vector3, dir: Vector3, turret: Compartment, salvo_yaw: float = 0.0, salvo_pitch: float = 0.0, plat_pitch: float = 0.0) -> void:
 	# Shot-to-shot scatter grows with a damaged mount, a ship at speed and a ship turning hard.
 	var motion := 1.0 + 0.6 * clampf(absf(ship.speed_ms) / maxf(ship.max_speed_ms, 1.0), 0.0, 1.0) \
 			+ 0.8 * absf(ship.rudder) * clampf(absf(ship.speed_ms) / maxf(ship.max_speed_ms, 1.0), 0.0, 1.0)
+	motion *= ship.hydro.scatter_factor() if ship.hydro != null else 1.0
 	var wear := 1.0 + (1.0 - turret.health_fraction()) + 3.0 * absf(ship.list_rad)    # a listing ship shoots worse
 	var spread := deg_to_rad(dispersion_deg) * wear * motion
 	var d := dir
 	d = d.rotated(Vector3.UP, salvo_yaw * motion + randfn(0.0, spread))
 	var right := d.cross(Vector3.UP).normalized()
-	d = d.rotated(right, salvo_pitch * motion + randfn(0.0, spread * 0.15))
+	d = d.rotated(right, salvo_pitch * motion + plat_pitch + randfn(0.0, spread * 0.15))
 	var cal := float(gun["caliber_mm"])
 	var spec := {
 		"caliber_mm": cal, "shell_kg": gun["shell_kg"],

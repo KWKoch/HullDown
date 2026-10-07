@@ -11,6 +11,7 @@ config/features=PackedStringArray("4.3", "Forward Plus")
 Roster="*res://scripts/data/roster.gd"
 Battlegrounds="*res://scripts/data/battlegrounds.gd"
 GameSession="*res://scripts/game/game_session.gd"
+Progress="*res://scripts/game/progress.gd"
 
 [display]
 window/size/viewport_width=1920

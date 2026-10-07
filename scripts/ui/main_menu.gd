@@ -259,12 +259,12 @@ func _build_play() -> Control:
 	# PvP
 	_mode_card(page, Vector2(cx, 40), w, "PVP", "FLEET BATTLES  -  15 v 15", Color(0.35, 0.6, 1.0),
 		["Human captains on both sides, one ship each.", "Seasonal ladders: rank, rewards and earnings reset each season.",
-		"Live matches once the player base can fill both fleets.", "Fleet and ship progression carries across seasons."],
+		"Live matches once the player base can fill both fleets.", "Open-water battlegrounds only: Surigao, Savo, Sunda and Mers-el-Kebir give 15 ships room to manoeuvre."],
 		"SEASON 1  -  COMING SOON")
 	# Story
 	_mode_card(page, Vector2(cx + w + 30, 40), w, "STORY MODE", "THE WAR AT SEA  -  CAMPAIGN", Color(0.5, 0.85, 0.5),
 		["Fight the war's great surface actions in sequence.", "Command a flotilla through historical scenarios.",
-		"Earn commendations, refits and new hulls.", "Built on the same ships and maps as Skirmish."],
+		"Earn commendations, refits and new hulls.", "Rank unlocks the close-quarters grounds: Narvik, the River Plate and Omaha Beach."],
 		"IN DEVELOPMENT  -  COMING SOON")
 	# Skirmish
 	var x3 := cx + (w + 30) * 2
@@ -357,6 +357,8 @@ func _mode_card(page: Control, pos: Vector2, w: float, title: String, tag: Strin
 
 
 func _refresh_selection() -> void:
+	if not Progress.is_unlocked(GameSession.ground_id):
+		GameSession.ground_id = "surigao_strait"
 	var g := Battlegrounds.get_ground(GameSession.ground_id)
 	var e := Roster.get_entry(GameSession.ship_id)
 	if play_map_thumb != null and not g.is_empty():
@@ -688,7 +690,8 @@ func _open_topo(gid: String) -> void:
 	side.add_child(t)
 	var tod := "Night" if float(g["time_of_day"]) < 5.0 or float(g["time_of_day"]) > 20.0 else ("Dawn" if float(g["time_of_day"]) < 8.0 else ("Dusk" if float(g["time_of_day"]) > 16.5 else "Day"))
 	var cx := 24.0
-	for chip in [String(g["date"]), String(g.get("weather", "clear")).capitalize(), tod]:
+	var mode_chip := "PVP READY" if Battlegrounds.is_pvp(gid) else "CAMPAIGN"
+	for chip in [String(g["date"]), String(g.get("weather", "clear")).capitalize(), tod, mode_chip]:
 		var cw := UIKit.font("body").get_string_size(chip, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 22.0
 		var cp := Panel.new()
 		cp.add_theme_stylebox_override("panel", UIKit.box(Color(1, 1, 1, 0.10), Color(1, 1, 1, 0.05), Color(1, 1, 1, 0.14), 12.0, 0.0, Color(0, 0, 0, 0), 0.0))
@@ -699,7 +702,10 @@ func _open_topo(gid: String) -> void:
 		cl.position = Vector2(11, 3)
 		cp.add_child(cl)
 		cx += cw + 8.0
-	var bl := _lbl(String(g["blurb"]), 15, Color(0.82, 0.87, 0.93), true)
+	var blurb_txt := String(g["blurb"])
+	if not Battlegrounds.is_pvp(gid):
+		blurb_txt += "\nCampaign ground. " + String(Battlegrounds.MODE_INFO[gid]["why"]) + "."
+	var bl := _lbl(blurb_txt, 15, Color(0.82, 0.87, 0.93), true)
 	bl.position = Vector2(24, 136)
 	bl.size = Vector2(492, 70)
 	side.add_child(bl)
@@ -795,7 +801,9 @@ func _open_topo(gid: String) -> void:
 		cb.position = Vector2(18 + k * (bw + 12), 904)
 		cb.size = Vector2(bw, 44)
 		side.add_child(cb)
-	var dep := _primary(_btn("USE FOR SKIRMISH", _use_map, Color(0.4, 0.9, 0.5), 18), Color("4ade80"))
+	var open_g := Progress.is_unlocked(gid)
+	var dep := _primary(_btn("USE FOR SKIRMISH" if open_g else "CAMPAIGN GROUND  -  LOCKED", _use_map, Color(0.4, 0.9, 0.5), 18 if open_g else 14), Color("4ade80"))
+	dep.disabled = not open_g
 	dep.position = Vector2(18, 962)
 	dep.size = Vector2(304, 54)
 	side.add_child(dep)
@@ -827,6 +835,8 @@ func _toggle_vis() -> void:
 
 
 func _use_map() -> void:
+	if not Progress.is_unlocked(topo_gid):
+		return
 	GameSession.ground_id = topo_gid
 	_refresh_selection()
 	_close_topo()

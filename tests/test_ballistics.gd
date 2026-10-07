@@ -15,6 +15,7 @@ func _mk(class_id: String, team: int, pos: Vector3) -> Ship:
 	var s := Ship.new()
 	add_child(s)
 	s.setup_from_class(Roster.get_entry(class_id), team)
+	s.sea_state = 0.0                       # deck motion has its own test (test_hydro)
 	s.global_position = pos
 	s.add_to_group("ships")
 	return s

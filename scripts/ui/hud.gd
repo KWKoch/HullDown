@@ -168,13 +168,13 @@ func _build() -> void:
 	strip.add_theme_stylebox_override("panel", _style(C_NAV))
 	strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(strip)
-	strip.position = Vector2(960.0 - 260.0, 62)
-	strip.custom_minimum_size = Vector2(520, 0)
+	strip.position = Vector2(960.0 - 360.0, 62)
+	strip.custom_minimum_size = Vector2(720, 0)
 	var hb := HBoxContainer.new()
 	hb.add_theme_constant_override("separation", 6)
 	hb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	strip.add_child(hb)
-	for it in [["speed", "SPEED"], ["heading", "HDG"], ["rudder", "RUDDER"], ["depth", "KEEL"]]:
+	for it in [["speed", "SPEED"], ["heading", "HDG"], ["rudder", "RUDDER"], ["steerage", "STEERAGE"], ["depth", "KEEL"], ["plat", "GUN PLATFORM"]]:
 		var cell := VBoxContainer.new()
 		cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		cell.add_theme_constant_override("separation", 0)
@@ -187,6 +187,11 @@ func _build() -> void:
 		cell.add_child(val)
 		hb.add_child(cell)
 		_values[it[0]] = val
+	_values["dyn"] = _label("", 13, C_DIM)
+	_values["dyn"].position = Vector2(960.0 - 360.0, 62 + 52)
+	_values["dyn"].custom_minimum_size = Vector2(720, 0)
+	_values["dyn"].horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	add_child(_values["dyn"])
 	# Damage readouts above the engine telegraph and the helm.
 	_values["prop"] = _gauge_tag(Vector2(960.0 - 170.0, 1080.0 - 12.0 - 190.0 - 34.0), 100.0, "PROP")
 	_values["steer"] = _gauge_tag(Vector2(960.0 - 170.0 + 110.0, 1080.0 - 12.0 - 68.0 - 34.0), 230.0, "STEER")
@@ -399,9 +404,10 @@ func _water_below_keel() -> float:
 		return 999.0
 	var p := ship.global_position
 	var fwd := Vector3(sin(ship.heading), 0.0, cos(ship.heading))
-	var here: float = -float(terrain.height_at(p.x, p.z)) - ship.wdraft()
+	var squat: float = ship.hydro.squat_world if ship.hydro != null else 0.0
+	var here: float = -float(terrain.height_at(p.x, p.z)) - ship.wdraft() - squat
 	var ahead_p := p + fwd * 250.0
-	var ahead: float = -float(terrain.height_at(ahead_p.x, ahead_p.z)) - ship.wdraft()
+	var ahead: float = -float(terrain.height_at(ahead_p.x, ahead_p.z)) - ship.wdraft() - squat
 	return minf(here, ahead)
 
 
@@ -412,6 +418,17 @@ func _update_nav() -> void:
 	_put("heading", "%03d°" % int(bearing_deg(ship.heading)), C_NAV)
 	var rd := controls.rudder_degrees()
 	_put("rudder", "%s %d°" % ["PORT" if rd > 0.5 else ("STBD" if rd < -0.5 else "MIDSHIPS"), int(roundf(absf(rd)))] if absf(rd) > 0.5 else "MIDSHIPS", C_NAV)
+	var hy: Hydro = ship.hydro
+	if hy != null:
+		var st := hy.steerage
+		_put("steerage", "NO WAY" if st < 0.08 else "%d%%" % int(st * 100.0), C_BAD if st < 0.08 else (C_WARN if st < 0.55 else C_GOOD))
+		var pm := hy.platform_motion()
+		_put("plat", ("STEADY" if pm < 0.25 else ("ROLLING" if pm < 0.6 else "UNSTEADY")) + "  %d°" % int(roundf(absf(rad_to_deg(hy.roll)))),
+			C_GOOD if pm < 0.25 else (C_WARN if pm < 0.6 else C_BAD))
+		var tr := hy.turn_radius()
+		_put("dyn", "STOP IN %d m   |   TURN RADIUS %s   |   HULL DRAG x%.2f%s" % [int(hy.stop_distance()),
+			"-" if tr > 5000.0 else "%d m" % int(tr), hy.drag_mult,
+			"   |   SHOAL WATER: drag +, squat %.1f m" % hy.squat_world if hy.shallow > 0.15 else ""], C_DIM)
 	var wb := _water_below_keel()
 	if wb > 900.0:
 		_put("depth", "-", C_DIM)

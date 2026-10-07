@@ -70,6 +70,26 @@ func _draw() -> void:
 		draw_circle(pt + Vector2(0, 1.5), 7.5, Color(0, 0, 0, 0.35))
 		draw_circle(pt, 6.5, Color(1, 1, 1, 0.95))
 		draw_circle(pt, 4.6, col)
+	var locked := not Progress.is_unlocked(String(ground["id"]))
+	if locked:
+		var shade := PackedColorArray()
+		for _p in rp:
+			shade.append(Color(0.03, 0.05, 0.09, 0.78))
+		draw_polygon(rp, shade)
+		_draw_lock(img.get_center() + Vector2(0, -26), 1.0)
+		var ut := Battlegrounds.unlock_text(String(ground["id"]))
+		var parts := ut.split("  -  ")
+		draw_string(UIKit.font("caps"), Vector2(img.position.x, img.get_center().y + 40), "CAMPAIGN UNLOCK", HORIZONTAL_ALIGNMENT_CENTER, img.size.x, 14, UIKit.GOLD)
+		draw_string(UIKit.font("semi"), Vector2(img.position.x, img.get_center().y + 64), parts[0], HORIZONTAL_ALIGNMENT_CENTER, img.size.x, 17, UIKit.INK)
+		if parts.size() > 1:
+			draw_string(UIKit.font("body"), Vector2(img.position.x, img.get_center().y + 86), parts[1], HORIZONTAL_ALIGNMENT_CENTER, img.size.x, 13, UIKit.DIM.lightened(0.25))
+	# mode badge
+	var pvp := Battlegrounds.is_pvp(String(ground["id"]))
+	var btxt := "PVP  READY" if pvp else "CAMPAIGN"
+	var bcol := Color(0.30, 0.55, 0.95) if pvp else Color(0.55, 0.42, 0.9)
+	var bw := UIKit.font("caps").get_string_size(btxt, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + 22
+	UIKit.fill_round(self, Rect2(img.position + Vector2(10, 10), Vector2(bw, 24)), 12.0, bcol.lightened(0.1), bcol.darkened(0.3))
+	draw_string(UIKit.font("caps"), img.position + Vector2(21, 27), btxt, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color.WHITE)
 	# compass tag
 	UIKit.fill_round(self, Rect2(img.position + Vector2(8, img.size.y - 34), Vector2(26, 26)), 13.0, Color(0, 0, 0, 0.55), Color(0, 0, 0, 0.55))
 	draw_string(UIKit.font("semi"), img.position + Vector2(15.5, img.size.y - 15), "N", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1, 1, 1, 0.95))
@@ -93,6 +113,14 @@ func _draw() -> void:
 	if selected:
 		UIKit.fill_round(self, Rect2(body.position + Vector2(14, body.size.y - 34), Vector2(84, 22)), 11.0, Color(0.2, 0.55, 0.3, 0.9), Color(0.12, 0.4, 0.22, 0.9))
 		draw_string(UIKit.font("caps"), body.position + Vector2(24, body.size.y - 18), "SELECTED", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color.WHITE)
+
+
+func _draw_lock(c: Vector2, k: float) -> void:
+	var body := Rect2(c + Vector2(-22, -2) * k, Vector2(44, 34) * k)
+	draw_arc(c + Vector2(0, -4) * k, 14.0 * k, PI, TAU, 24, Color(0.85, 0.88, 0.95, 0.95), 6.0 * k, true)
+	UIKit.fill_round(self, body, 8.0 * k, Color(0.96, 0.78, 0.30), Color(0.78, 0.55, 0.12))
+	draw_circle(body.get_center() + Vector2(0, -2) * k, 4.5 * k, Color(0.25, 0.17, 0.04))
+	draw_rect(Rect2(body.get_center() + Vector2(-1.8, 0) * k, Vector2(3.6, 10) * k), Color(0.25, 0.17, 0.04))
 
 
 func _tod(h: float) -> String:

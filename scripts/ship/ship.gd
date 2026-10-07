@@ -28,7 +28,10 @@ var reserve_buoyancy_t: float = 3000.0
 
 # Dynamic state
 var heading: float = 0.0             ## radians, 0 = +Z
-var speed_ms: float = 0.0
+var speed_ms: float = 0.0            ## surge: forward speed through the water
+var sway_ms: float = 0.0             ## sideways slip, + to starboard (the outside of a port turn)
+var sea_state: float = 1.5           ## 0 flat .. 5 rough; set by the battleground
+var hydro: Hydro                     ## hull dynamics: thrust/drag, steerage way, drift, roll, shallow water
 var throttle: float = 0.0            ## -0.3 .. 1.0
 var rudder: float = 0.0             ## -1 .. 1
 var list_rad: float = 0.0            ## heel from asymmetric flooding
@@ -89,12 +92,14 @@ func setup_from_class(entry: Dictionary, p_team: int) -> void:
 	scale = Vector3.ONE * WORLD_SCALE
 	dc = DamageControl.new()
 	dc.setup(self, crew_skill)
+	hydro = Hydro.new()
+	hydro.setup(self)
 
 
 ## World-space dimensions (what the eye and the sensors see).
 ## World-space velocity vector of the ship.
 func velocity_vec() -> Vector3:
-	return Vector3(sin(heading), 0.0, cos(heading)) * speed_ms
+	return Vector3(sin(heading), 0.0, cos(heading)) * speed_ms + Vector3(-cos(heading), 0.0, sin(heading)) * sway_ms
 
 
 func wlen() -> float:
@@ -457,16 +462,14 @@ func _spread_fire(src: Compartment, delta: float) -> void:
 
 
 func _move(delta: float) -> void:
-	var list_drag := 1.0 - 0.25 * clampf(absf(list_rad) / 0.4, 0.0, 1.0)     # a heeled hull plough through the water
-	var target := throttle * max_speed_ms * propulsion_fraction() * list_drag
-	var accel := 0.04 * max_speed_ms * (1.0 + propulsion_fraction()) * (1.0 - 0.5 * flood_ratio())
-	speed_ms = move_toward(speed_ms, target, accel * delta)
-	var steer := rudder * steering_fraction()
-	var speed_factor := clampf(absf(speed_ms) / maxf(max_speed_ms, 0.01), 0.0, 1.0)
-	heading += steer * turn_rate_rad * handling_fraction() * speed_factor * delta * signf(speed_ms if speed_ms != 0.0 else 1.0)
+	if hydro == null:
+		hydro = Hydro.new()
+		hydro.setup(self)
+	hydro.step(delta)
 	var fwd := Vector3(sin(heading), 0.0, cos(heading))
-	global_position += fwd * speed_ms * delta
-	rotation = Vector3(trim_rad, heading, list_rad)
+	var right := Vector3(-cos(heading), 0.0, sin(heading))
+	global_position += (fwd * speed_ms + right * sway_ms) * delta
+	rotation = Vector3(trim_rad + hydro.pitch, heading, list_rad + hydro.roll)
 	dead_in_water = propulsion_fraction() < 0.05
 
 
@@ -479,10 +482,15 @@ func _check_terrain(delta: float) -> void:
 	_ground_cd = maxf(0.0, _ground_cd - delta)
 	# Sample bow, midships and stern keel points for grounding.
 	var fwd := Vector3(sin(heading), 0.0, cos(heading))
+	var eff_draft := wdraft() + (hydro.squat_world if hydro != null else 0.0)    # a fast hull settles by the stern
+	var shallowest := 1.0e9
 	for f in [0.5, 0.0, -0.5]:
 		var p: Vector3 = global_position + fwd * (wlen() * f)
 		var floor_y: float = terrain.height_at(p.x, p.z)
-		if floor_y > -wdraft():
+		shallowest = minf(shallowest, -floor_y)
+		if hydro != null:
+			hydro.depth_world = maxf(shallowest, 0.0)
+		if floor_y > -eff_draft:
 			var hardness: float = terrain.hardness_at(p.x, p.z) if terrain.has_method("hardness_at") else 1.0
 			# Damage only on actual contact at speed, with a cooldown; a ship that is
 			# stuck on the bottom just stays stuck (it can reverse off).
@@ -606,6 +614,7 @@ func _nearest_on(f: Array, p: Vector2) -> Vector2:
 func _apply_collision_impulse(new_v: Vector2, impulse: Vector2, r: Vector2, mass_kg: float) -> void:
 	var fwd := Vector2(sin(heading), cos(heading))
 	speed_ms = new_v.dot(fwd)
+	sway_ms = new_v.dot(Vector2(-cos(heading), sin(heading)))
 	var inertia := mass_kg * (wlen() * wlen() + wbeam() * wbeam()) / 12.0
 	var torque := r.y * impulse.x - r.x * impulse.y
 	heading += clampf(torque / inertia, -0.15, 0.15) * 0.5
