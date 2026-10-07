@@ -5,15 +5,22 @@ extends CanvasLayer
 
 var _overlay: ColorRect
 var _fs_done := false
-var _phone := false
+var phone := false          ## true on phones/tablets: also switches on the lighter rendering tier
 
 
 func _ready() -> void:
 	layer = 100
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	_phone = OS.has_feature("mobile")
+	phone = OS.has_feature("mobile")
 	if OS.has_feature("web"):
-		_phone = bool(JavaScriptBridge.eval("/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)"))
+		phone = bool(JavaScriptBridge.eval("/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)"))
+	# Phone rendering tier: draw the 3D scene at 60% resolution (the HUD stays sharp), no MSAA.
+	if phone or OS.get_cmdline_user_args().has("--lowfx"):
+		phone = true
+		var root := get_tree().root
+		root.msaa_3d = Viewport.MSAA_DISABLED
+		root.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
+		root.scaling_3d_scale = 0.6
 	_overlay = ColorRect.new()
 	_overlay.color = Color(0.03, 0.05, 0.08, 1.0)
 	_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -34,13 +41,13 @@ func _ready() -> void:
 
 func _check() -> void:
 	var ws := Vector2(get_window().size)
-	var upright := _phone and ws.y > ws.x
+	var upright := phone and ws.y > ws.x
 	_overlay.visible = upright
 	get_tree().paused = upright
 
 
 func _input(e: InputEvent) -> void:
-	if _fs_done or not _phone:
+	if _fs_done or not phone:
 		return
 	if (e is InputEventScreenTouch and (e as InputEventScreenTouch).pressed) or (e is InputEventMouseButton and (e as InputEventMouseButton).pressed):
 		_fs_done = true

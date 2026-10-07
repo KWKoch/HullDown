@@ -208,6 +208,8 @@ void fragment() {
 ## Builds the sky, light and sea under `parent`. Returns {sun, env, sea, preset}.
 static func build(parent: Node3D, preset_name: String, sea_size: Vector2, shadows: bool = true) -> Dictionary:
 	var p: Dictionary = PRESETS.get(preset_name, PRESETS["clear"])
+	if MobileMode.phone:
+		shadows = false          # sun shadow pass is too costly on phone GPUs
 
 	var sun := DirectionalLight3D.new()
 	sun.light_color = p["sun_color"]
@@ -237,8 +239,8 @@ static func build(parent: Node3D, preset_name: String, sea_size: Vector2, shadow
 	sky_mat.set_shader_parameter("sun_disc", 0.0 if preset_name == "overcast" else 1.0)
 	var sky := Sky.new()
 	sky.sky_material = sky_mat
-	sky.radiance_size = Sky.RADIANCE_SIZE_128
-	sky.process_mode = Sky.PROCESS_MODE_REALTIME
+	sky.radiance_size = Sky.RADIANCE_SIZE_64 if MobileMode.phone else Sky.RADIANCE_SIZE_128
+	sky.process_mode = Sky.PROCESS_MODE_INCREMENTAL      # clouds drift slowly: refresh the reflection cubemap a face at a time
 
 	var e := Environment.new()
 	e.background_mode = Environment.BG_SKY
