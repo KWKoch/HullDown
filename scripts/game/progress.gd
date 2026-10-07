@@ -6,6 +6,7 @@ const PATH := "user://progress.cfg"
 
 var rank := 0                       ## index into Battlegrounds.RANKS
 var unlock_all := false
+var viewed := {}                    ## ship ids looked at this session (drives the NEW badge)
 
 
 func _ready() -> void:
@@ -29,3 +30,8 @@ func set_rank(r: int) -> void:
 ## Open-water grounds are always available; the rest need the commission rank from Story Mode.
 func is_unlocked(ground_id: String) -> bool:
 	return unlock_all or Battlegrounds.is_pvp(ground_id) or rank >= Battlegrounds.unlock_rank(ground_id)
+
+
+## Ships the player owns. Test build: every ship. (Currencies and unlocking come later.)
+func ship_owned(_id: String) -> bool:
+	return true
