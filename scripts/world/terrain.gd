@@ -287,6 +287,11 @@ func _tri(st: SurfaceTool, a: Dictionary, b: Dictionary, c: Dictionary) -> void:
 
 
 func _color_for(h: float, cliff: bool) -> Color:
+	var theme := String(ground.get("land_theme", "green"))
+	if h > 2.0 and theme == "snow":
+		return Color(0.42, 0.40, 0.38) if cliff else Color(0.84, 0.88, 0.94).lerp(Color(0.96, 0.97, 1.0), clampf(h / 200.0, 0.0, 1.0))
+	if h > 2.0 and theme == "desert":
+		return Color(0.52, 0.42, 0.32) if cliff else Color(0.80, 0.70, 0.48).lerp(Color(0.62, 0.50, 0.36), clampf(h / 250.0, 0.0, 1.0))
 	if h > 2.0:
 		if cliff:
 			return Color(0.45, 0.42, 0.38)       # exposed rock face

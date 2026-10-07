@@ -51,6 +51,7 @@ var topo_info: Label
 var topo_pct: Label
 var topo_bar: Panel
 var topo_gid := ""
+var maps_scroll: ScrollContainer
 var vis_btn: Button
 
 
@@ -95,6 +96,9 @@ func _test_args() -> void:
 			GameSession.ship_id = a.substr(7)
 		elif a.begins_with("--map="):
 			GameSession.ground_id = a.substr(6)
+		elif a.begins_with("--scroll="):
+			await get_tree().create_timer(6.0).timeout
+			maps_scroll.scroll_vertical = int(a.substr(9))
 		elif a == "--launch":
 			_launch.call_deferred()
 		elif a.begins_with("--browse="):
@@ -600,6 +604,7 @@ func _build_maps() -> Control:
 	sc.position = Vector2(24, 54)
 	sc.size = Vector2(1872, 920)
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	maps_scroll = sc
 	page.add_child(sc)
 	var grid := GridContainer.new()
 	grid.columns = 5

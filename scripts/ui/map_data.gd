@@ -30,7 +30,11 @@ static func exag(h: float) -> float:
 	return h * LAND_EXAG if h > 0.0 else h * SEA_EXAG
 
 
-static func tint(h: float) -> Color:
+static func tint(h: float, theme: String = "green") -> Color:
+	if h > 0.5 and theme == "snow":
+		return Color(0.80, 0.85, 0.92).lerp(Color(0.97, 0.98, 1.0), smoothstep(0.0, 0.4, clampf(h / 400.0, 0.0, 1.0)))
+	if h > 0.5 and theme == "desert":
+		return Color(0.82, 0.72, 0.50).lerp(Color(0.66, 0.52, 0.36), smoothstep(0.0, 0.6, clampf(h / 300.0, 0.0, 1.0)))
 	if h > 0.5:
 		var t := clampf(h / 700.0, 0.0, 1.0)
 		var c := Color(0.30, 0.46, 0.22).lerp(Color(0.64, 0.57, 0.38), smoothstep(0.0, 0.5, t))
@@ -59,7 +63,7 @@ static func thumbnail(g: Dictionary, n: int = 128) -> ImageTexture:
 			# light from the north-west
 			var slope := ((hl - hr) * 0.7 + (hu - hd) * 0.7) / (2.0 * cellm)
 			var shade := 1.0 + clampf(slope * (6.0 if h > 0.0 else 1.5), -0.45, 0.45)
-			var c := tint(h)
+			var c := tint(h, String(g.get("land_theme", "green")))
 			img.set_pixel(sx, sy, Color(c.r * shade, c.g * shade, c.b * shade))
 	img.resize(512, 512, Image.INTERPOLATE_LANCZOS)
 	img.generate_mipmaps()

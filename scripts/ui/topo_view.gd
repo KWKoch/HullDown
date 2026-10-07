@@ -15,6 +15,7 @@ uniform sampler2D vis_tex : filter_linear;
 uniform float arena = 14000.0;
 uniform float show_vis = 1.0;
 uniform float land_exag = 3.0;
+uniform int theme = 0;
 uniform float sea_exag = 0.15;
 varying float vh;
 varying vec2 wuv;
@@ -38,6 +39,11 @@ void fragment() {
 		col = mix(col, vec3(0.47, 0.56, 0.31), smoothstep(80.0, 260.0, vh));
 		col = mix(col, vec3(0.56, 0.50, 0.42), smoothstep(250.0, 520.0, vh));
 		col = mix(col, vec3(0.94, 0.95, 0.97), smoothstep(620.0, 980.0, vh));
+		if (theme == 1) {
+			col = mix(vec3(0.78, 0.84, 0.92), vec3(0.97, 0.98, 1.0), smoothstep(2.0, 60.0, vh));
+		} else if (theme == 2) {
+			col = mix(vec3(0.86, 0.78, 0.56), vec3(0.68, 0.55, 0.38), smoothstep(5.0, 260.0, vh));
+		}
 		float steep = smoothstep(0.80, 0.55, up);
 		col = mix(col, vec3(0.42, 0.38, 0.34), steep * 0.75);
 	} else {
@@ -178,6 +184,8 @@ func _build_mesh() -> void:
 	mat.shader = sh
 	mat.set_shader_parameter("arena", size_m.x)
 	mat.set_shader_parameter("land_exag", MapData.LAND_EXAG)
+	var th := String(ground.get("land_theme", "green"))
+	mat.set_shader_parameter("theme", 1 if th == "snow" else (2 if th == "desert" else 0))
 	mat.set_shader_parameter("sea_exag", MapData.SEA_EXAG)
 	terrain_mi.material_override = mat
 	vp.add_child(terrain_mi)
