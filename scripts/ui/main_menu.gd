@@ -65,6 +65,7 @@ func _ready() -> void:
 	pages = [_build_play(), _build_fleet(), _build_maps()]
 	for p in pages:
 		add_child(p)
+	_fit_pages()
 	_build_overlay()
 	_browse_id = GameSession.ship_id
 	_refresh_selection()
@@ -170,13 +171,25 @@ func _build_bg() -> void:
 	add_child(UIKit.Backdrop.new())
 
 
+## Navigation rail on the right (the old top ribbon, 30% larger, turned into vertical tabs). The
+## rest of the screen, CONTENT_W wide, is the viewport each tab fills.
+const RAIL_W := 340.0
+const CONTENT_W := 1920.0 - RAIL_W
+const MODE_COLS := [Color(0.35, 0.6, 1.0), Color(0.5, 0.85, 0.5), Color(1.0, 0.78, 0.3)]
+
+var _mode := 2
+var _mode_tiles: Array[Panel] = []
+var _mode_views: Array[Control] = []
+
+
 func _build_top() -> void:
+	var rx := 1920.0 - RAIL_W
 	var bar := Panel.new()
-	var bb := UIKit.box(Color(0.05, 0.08, 0.13, 0.92), Color(0.03, 0.05, 0.09, 0.88), Color(1, 1, 1, 0.0), 0.0, 0.0)
+	var bb := UIKit.box(Color(0.05, 0.08, 0.13, 0.94), Color(0.03, 0.05, 0.09, 0.92), Color(1, 1, 1, 0.0), 0.0, 0.0)
 	bb.border_w = 0.0
 	bar.add_theme_stylebox_override("panel", bb)
-	bar.position = Vector2.ZERO
-	bar.size = Vector2(1920, 92)
+	bar.position = Vector2(rx, 0)
+	bar.size = Vector2(RAIL_W, 1080)
 	add_child(bar)
 	var gt := GradientTexture2D.new()
 	var gr := Gradient.new()
@@ -184,49 +197,84 @@ func _build_top() -> void:
 	gr.offsets = PackedFloat32Array([0.0, 0.5, 1.0])
 	gt.gradient = gr
 	gt.fill_from = Vector2(0, 0)
-	gt.fill_to = Vector2(1, 0)
-	gt.width = 512
-	gt.height = 2
+	gt.fill_to = Vector2(0, 1)
+	gt.width = 2
+	gt.height = 512
 	var ln := TextureRect.new()
 	ln.texture = gt
 	ln.stretch_mode = TextureRect.STRETCH_SCALE
 	ln.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	ln.position = Vector2(0, 90)
-	ln.size = Vector2(1920, 2)
+	ln.position = Vector2(rx, 0)
+	ln.size = Vector2(2, 1080)
 	add_child(ln)
-	var t := _lbl("HULL DOWN", 46, GOLD)
-	t.position = Vector2(40, 8)
+	var t := _lbl("HULL\nDOWN", 60, GOLD)
+	t.position = Vector2(rx + 28, 14)
+	t.add_theme_constant_override("line_spacing", -14)
 	t.add_theme_color_override("font_shadow_color", Color(GOLD.r, GOLD.g, GOLD.b, 0.35))
 	t.add_theme_constant_override("shadow_outline_size", 12)
 	add_child(t)
-	var st := _lbl("SQUATCH SQUAD STUDIOS", 12, DIM)
+	var st := _lbl("SQUATCH SQUAD STUDIOS", 16, DIM)
 	st.add_theme_font_override("font", UIKit.font("caps"))
-	st.position = Vector2(44, 68)
+	st.position = Vector2(rx + 32, 170)
 	add_child(st)
-	# pill tab group
-	var grp := Panel.new()
-	grp.add_theme_stylebox_override("panel", UIKit.box(Color(1, 1, 1, 0.05), Color(1, 1, 1, 0.02), Color(1, 1, 1, 0.12), 30.0, 0.0))
-	grp.position = Vector2(600, 16)
-	grp.size = Vector2(720, 60)
-	add_child(grp)
 	var names := ["PLAY", "FLEET STORE", "MAPS"]
 	for k in 3:
 		var b := Button.new()
 		b.text = names[k]
 		b.focus_mode = Control.FOCUS_NONE
 		b.add_theme_font_override("font", UIKit.font("caps"))
-		b.add_theme_font_size_override("font_size", 17)
+		b.add_theme_font_size_override("font_size", 22)
 		b.add_theme_color_override("font_color", DIM)
 		b.add_theme_color_override("font_hover_color", Color.WHITE)
-		b.position = Vector2(606 + k * 236, 22)
-		b.size = Vector2(228, 48)
+		b.position = Vector2(rx + 22, 250 + k * 84)
+		b.size = Vector2(RAIL_W - 44, 66)
 		b.pressed.connect(_show_tab.bind(k))
 		add_child(b)
 		tab_btns.append(b)
-	credits_lbl = _lbl("TEST BUILD  -  ALL SHIPS UNLOCKED", 13, DIM)
+	credits_lbl = _lbl("TEST BUILD\nALL SHIPS UNLOCKED", 17, DIM)
 	credits_lbl.add_theme_font_override("font", UIKit.font("caps"))
-	credits_lbl.position = Vector2(1480, 38)
+	credits_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	credits_lbl.position = Vector2(rx + 20, 940)
+	credits_lbl.size = Vector2(RAIL_W - 40, 50)
 	add_child(credits_lbl)
+
+
+## Where MobileMode puts its fullscreen button on this screen: the foot of the rail.
+func fullscreen_button_pos() -> Vector2:
+	return Vector2(1920.0 - RAIL_W * 0.5 - 32.0, 1000.0)
+
+
+## Pages are laid out for a 1920-wide screen; the store and map pages are scaled to fit the
+## viewport left of the rail (the play page is built for it directly).
+func _fit_pages() -> void:
+	for i in pages.size():
+		var pg := pages[i]
+		if i == 0:
+			pg.set_meta("y0", 0.0)
+			continue
+		var sc := CONTENT_W / 1920.0
+		pg.scale = Vector2(sc, sc)
+		pg.position.x = 0.0
+		pg.set_meta("y0", 0.0)
+		# Stretch the tall panels so the scaled page still fills the full height.
+		var delta := 1080.0 / sc - 988.0 - 20.0
+		pg.size.y += delta
+		for c in pg.get_children():
+			var cc := c as Control
+			if cc == null:
+				continue
+			if cc.size.y >= 880.0:
+				cc.size.y += delta
+				for g in cc.get_children():
+					var gc := g as Control
+					if gc == null:
+						continue
+					if gc is ScrollContainer:
+						gc.size.y += delta
+					elif gc.position.y >= 740.0:
+						gc.position.y += delta
+			elif cc.position.y >= 900.0:
+				cc.position.y += delta
 
 
 func _show_tab(k: int) -> void:
@@ -236,128 +284,189 @@ func _show_tab(k: int) -> void:
 	for i in tab_btns.size():
 		var on := (i == k)
 		var nb := UIKit.box(GOLD.darkened(0.15) if on else Color(0, 0, 0, 0), GOLD.darkened(0.55) if on else Color(0, 0, 0, 0),
-			Color(GOLD.r, GOLD.g, GOLD.b, 0.9) if on else Color(0, 0, 0, 0), 24.0, 0.0, Color(GOLD.r, GOLD.g, GOLD.b, 0.45) if on else Color(0, 0, 0, 0), 8.0)
+			Color(GOLD.r, GOLD.g, GOLD.b, 0.9) if on else Color(1, 1, 1, 0.10), 18.0, 0.0, Color(GOLD.r, GOLD.g, GOLD.b, 0.45) if on else Color(0, 0, 0, 0), 8.0)
 		tab_btns[i].add_theme_stylebox_override("normal", nb)
-		tab_btns[i].add_theme_stylebox_override("hover", nb if on else UIKit.box(Color(1, 1, 1, 0.07), Color(1, 1, 1, 0.03), Color(1, 1, 1, 0.12), 24.0, 0.0, Color(0, 0, 0, 0), 8.0))
+		tab_btns[i].add_theme_stylebox_override("hover", nb if on else UIKit.box(Color(1, 1, 1, 0.07), Color(1, 1, 1, 0.03), Color(1, 1, 1, 0.16), 18.0, 0.0, Color(0, 0, 0, 0), 8.0))
 		tab_btns[i].add_theme_stylebox_override("pressed", nb)
 		tab_btns[i].add_theme_color_override("font_color", Color("1a1204") if on else DIM)
 		tab_btns[i].add_theme_color_override("font_hover_color", Color("1a1204") if on else Color.WHITE)
 	var pg: Control = pages[k]
+	var y0: float = pg.get_meta("y0", 0.0)
 	pg.modulate.a = 0.0
-	pg.position.y = 112
+	pg.position.y = y0 + 20.0
 	var tw := create_tween().set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	tw.tween_property(pg, "modulate:a", 1.0, 0.28)
-	tw.tween_property(pg, "position:y", 92.0, 0.28)
+	tw.tween_property(pg, "position:y", y0, 0.28)
 	if k == 2:
 		_queue_thumbs()
 
 
 # --- PLAY ---------------------------------------------------------------------
+# Three compact mode tiles across the top select what the large panel below shows.
 
 func _build_play() -> Control:
 	var page := Control.new()
-	page.position = Vector2(0, 92)
-	page.size = Vector2(1920, 988)
-	var cx := 30.0
-	var w := 600.0
-	# PvP
-	_mode_card(page, Vector2(cx, 40), w, "PVP", "FLEET BATTLES  -  15 v 15", Color(0.35, 0.6, 1.0),
+	page.position = Vector2.ZERO
+	page.size = Vector2(CONTENT_W, 1080)
+	var m := 28.0
+	var tw := (CONTENT_W - m * 4.0) / 3.0
+	var th := 200.0
+	var tiles := [["PVP", "FLEET BATTLES  -  15 v 15", "SEASON 1  -  COMING SOON"],
+		["STORY MODE", "THE WAR AT SEA  -  CAMPAIGN", "IN DEVELOPMENT"],
+		["SKIRMISH", "15 v 15 AGAINST AI", "READY"]]
+	for i in 3:
+		_mode_tile(page, i, Vector2(m + i * (tw + m), m), Vector2(tw, th), tiles[i][0], tiles[i][1], tiles[i][2])
+	var vy := m * 2.0 + th
+	var vsz := Vector2(CONTENT_W - m * 2.0, 1080.0 - vy - m)
+	_mode_views.append(_mode_view(page, Vector2(m, vy), vsz, "PVP", MODE_COLS[0],
 		["Human captains on both sides, one ship each.", "Seasonal ladders: rank, rewards and earnings reset each season.",
-		"Live matches once the player base can fill both fleets.", "Open-water battlegrounds only: Surigao, Savo, Sunda and Mers-el-Kebir give 15 ships room to manoeuvre."],
-		"SEASON 1  -  COMING SOON")
-	# Story
-	_mode_card(page, Vector2(cx + w + 30, 40), w, "STORY MODE", "THE WAR AT SEA  -  CAMPAIGN", Color(0.5, 0.85, 0.5),
+		"Live matches once the player base can fill both fleets.", "Open-water battlegrounds: Surigao, Savo, Sunda, Mers-el-Kebir, Okinawa, the Barents Sea and the North Atlantic."],
+		"SEASON 1  -  COMING SOON", "15 v 15"))
+	_mode_views.append(_mode_view(page, Vector2(m, vy), vsz, "STORY MODE", MODE_COLS[1],
 		["Fight the war's great surface actions in sequence.", "Command a flotilla through historical scenarios.",
-		"Earn commendations, refits and new hulls.", "Rank unlocks the close-quarters grounds: Narvik, the River Plate and Omaha Beach."],
-		"IN DEVELOPMENT  -  COMING SOON")
-	# Skirmish
-	var x3 := cx + (w + 30) * 2
-	var card := Panel.new()
-	card.add_theme_stylebox_override("panel", UIKit.box(Color(0.15, 0.17, 0.2, 0.92), Color(0.07, 0.085, 0.12, 0.94), Color(GOLD.r, GOLD.g, GOLD.b, 0.75), 18.0, 0.8, Color(GOLD.r, GOLD.g, GOLD.b, 0.22), 14.0))
-	card.position = Vector2(x3, 40)
-	card.size = Vector2(w, 880)
-	page.add_child(card)
-	var head := _lbl("SKIRMISH", 38, GOLD)
-	head.position = Vector2(24, 18)
-	card.add_child(head)
-	var sub := _lbl("TEST RANGE  -  15 v 15 AGAINST AI", 16, DIM)
-	sub.position = Vector2(26, 70)
-	card.add_child(sub)
-	play_map_thumb = TextureRect.new()
-	play_map_thumb.position = Vector2(24, 110)
-	play_map_thumb.size = Vector2(w - 48, 300)
-	play_map_thumb.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	play_map_thumb.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-	card.add_child(play_map_thumb)
-	play_map_lbl = _lbl("", 22, INK)
-	play_map_lbl.position = Vector2(24, 422)
-	play_map_lbl.size = Vector2(w - 48, 60)
-	card.add_child(play_map_lbl)
-	play_ship_lbl = _lbl("", 22, GOLD)
-	play_ship_lbl.position = Vector2(24, 500)
-	play_ship_lbl.size = Vector2(w - 48, 30)
-	card.add_child(play_ship_lbl)
-	play_ship_sub = _lbl("", 15, DIM)
-	play_ship_sub.position = Vector2(24, 534)
-	play_ship_sub.size = Vector2(w - 48, 30)
-	card.add_child(play_ship_sub)
-	var bm := _btn("CHANGE MAP", _show_tab.bind(2), GOLD.darkened(0.2), 18)
-	bm.position = Vector2(24, 600)
-	bm.size = Vector2((w - 60) * 0.5, 50)
-	card.add_child(bm)
-	var bs := _btn("CHANGE SHIP", _show_tab.bind(1), GOLD.darkened(0.2), 18)
-	bs.position = Vector2(24 + (w - 60) * 0.5 + 12, 600)
-	bs.size = Vector2((w - 60) * 0.5, 50)
-	card.add_child(bs)
-	var go := _primary(_btn("LAUNCH BATTLE", _launch, Color(0.4, 0.9, 0.5), 30), Color("4ade80"))
-	go.position = Vector2(24, 700)
-	go.size = Vector2(w - 48, 90)
-	card.add_child(go)
-	var note := _lbl("ESC returns to this menu during battle.", 14, DIM)
-	note.position = Vector2(24, 810)
-	card.add_child(note)
+		"Earn commendations, refits and new hulls.", "Rank unlocks the close-quarters grounds: Narvik, the River Plate, Omaha Beach, the Gulf Coast and the Arabian Gulf."],
+		"IN DEVELOPMENT  -  COMING SOON", "1939-45"))
+	_mode_views.append(_skirmish_view(page, Vector2(m, vy), vsz))
+	_select_mode(2)
 	return page
 
 
-func _mode_card(page: Control, pos: Vector2, w: float, title: String, tag: String, col: Color, bullets: Array, status: String) -> void:
+func _mode_tile(page: Control, idx: int, pos: Vector2, sz: Vector2, title: String, tag: String, status: String) -> void:
+	var col: Color = MODE_COLS[idx]
 	var card := Panel.new()
-	card.add_theme_stylebox_override("panel", UIKit.glass(18.0, 0.8))
 	card.position = pos
-	card.size = Vector2(w, 880)
+	card.size = sz
 	page.add_child(card)
+	_mode_tiles.append(card)
 	var band := Panel.new()
-	band.add_theme_stylebox_override("panel", UIKit.box(col.darkened(0.25), col.darkened(0.7), Color(col.r, col.g, col.b, 0.5), 14.0, 0.0))
-	band.position = Vector2(12, 12)
-	band.size = Vector2(w - 24, 124)
+	band.add_theme_stylebox_override("panel", UIKit.box(col.darkened(0.25), col.darkened(0.7), Color(col.r, col.g, col.b, 0.5), 12.0, 0.0))
+	band.position = Vector2(10, 10)
+	band.size = Vector2(sz.x - 20, 116)
+	band.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	card.add_child(band)
-	var h := _lbl(title, 46, col.lightened(0.25))
-	h.position = Vector2(32, 24)
+	var h := _lbl(title, 40, col.lightened(0.25))
+	h.position = Vector2(26, 20)
 	card.add_child(h)
 	var tg := _lbl(tag, 14, INK)
 	tg.add_theme_font_override("font", UIKit.font("caps"))
-	tg.position = Vector2(34, 92)
+	tg.position = Vector2(28, 84)
 	card.add_child(tg)
-	var wm := _lbl("15 v 15" if title == "PVP" else "1939-45", 120, Color(col.r, col.g, col.b, 0.07))
-	wm.position = Vector2(20, 560)
+	var stl := _lbl(status, 16, col.lightened(0.3) if status == "READY" else DIM)
+	stl.add_theme_font_override("font", UIKit.font("caps"))
+	stl.position = Vector2(28, 146)
+	card.add_child(stl)
+	for c in card.get_children():
+		(c as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var hit := Button.new()
+	hit.flat = true
+	hit.focus_mode = Control.FOCUS_NONE
+	hit.position = Vector2.ZERO
+	hit.size = sz
+	hit.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
+	hit.add_theme_stylebox_override("hover", StyleBoxEmpty.new())
+	hit.add_theme_stylebox_override("pressed", StyleBoxEmpty.new())
+	hit.pressed.connect(_select_mode.bind(idx))
+	card.add_child(hit)
+
+
+func _select_mode(i: int) -> void:
+	_mode = i
+	for k in _mode_tiles.size():
+		var col: Color = MODE_COLS[k]
+		var on := k == i
+		if on:
+			_mode_tiles[k].add_theme_stylebox_override("panel", UIKit.box(Color(0.15, 0.17, 0.2, 0.94), Color(0.07, 0.085, 0.12, 0.96),
+				Color(col.r, col.g, col.b, 0.95), 16.0, 0.8, Color(col.r, col.g, col.b, 0.30), 14.0))
+		else:
+			_mode_tiles[k].add_theme_stylebox_override("panel", UIKit.glass(16.0, 0.6))
+		_mode_tiles[k].modulate = Color(1, 1, 1, 1.0 if on else 0.72)
+	for k in _mode_views.size():
+		_mode_views[k].visible = k == i
+
+
+func _mode_view(page: Control, pos: Vector2, sz: Vector2, title: String, col: Color, bullets: Array, status: String, watermark: String) -> Control:
+	var card := Panel.new()
+	card.add_theme_stylebox_override("panel", UIKit.glass(18.0, 0.8))
+	card.position = pos
+	card.size = sz
+	page.add_child(card)
+	var wm := _lbl(watermark, 220, Color(col.r, col.g, col.b, 0.06))
+	wm.position = Vector2(sz.x - 1000.0, sz.y - 330.0)
 	wm.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	card.add_child(wm)
-	var y := 172.0
+	var h := _lbl(title, 46, col.lightened(0.25))
+	h.position = Vector2(44, 30)
+	card.add_child(h)
+	var y := 130.0
 	for b in bullets:
 		var dot := Panel.new()
-		dot.add_theme_stylebox_override("panel", UIKit.box(col.lightened(0.2), col, Color(0, 0, 0, 0), 5.0, 0.0, Color(col.r, col.g, col.b, 0.6), 0.0))
-		dot.position = Vector2(32, y + 9)
-		dot.size = Vector2(10, 10)
+		dot.add_theme_stylebox_override("panel", UIKit.box(col.lightened(0.2), col, Color(0, 0, 0, 0), 6.0, 0.0, Color(col.r, col.g, col.b, 0.6), 0.0))
+		dot.position = Vector2(46, y + 12)
+		dot.size = Vector2(12, 12)
 		card.add_child(dot)
-		var bl := _lbl(String(b), 18, Color(0.82, 0.87, 0.93), true)
-		bl.position = Vector2(54, y)
-		bl.size = Vector2(w - 84, 60)
+		var bl := _lbl(String(b), 24, Color(0.82, 0.87, 0.93), true)
+		bl.position = Vector2(74, y)
+		bl.size = Vector2(sz.x - 140, 70)
 		card.add_child(bl)
-		y += 78.0
+		y += 92.0
 	var dis := _btn(status, func(): pass, col, 22)
 	dis.disabled = true
-	dis.position = Vector2(30, 760)
-	dis.size = Vector2(w - 60, 70)
+	dis.position = Vector2(44, sz.y - 110)
+	dis.size = Vector2(620, 70)
 	card.add_child(dis)
+	return card
+
+
+func _skirmish_view(page: Control, pos: Vector2, sz: Vector2) -> Control:
+	var card := Panel.new()
+	card.add_theme_stylebox_override("panel", UIKit.box(Color(0.15, 0.17, 0.2, 0.92), Color(0.07, 0.085, 0.12, 0.94), Color(GOLD.r, GOLD.g, GOLD.b, 0.75), 18.0, 0.8, Color(GOLD.r, GOLD.g, GOLD.b, 0.22), 14.0))
+	card.position = pos
+	card.size = sz
+	page.add_child(card)
+	var pad := 30.0
+	var tw := sz.x * 0.58
+	play_map_thumb = TextureRect.new()
+	play_map_thumb.position = Vector2(pad, pad)
+	play_map_thumb.size = Vector2(tw, sz.y - pad * 2.0)
+	play_map_thumb.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	play_map_thumb.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	card.add_child(play_map_thumb)
+	var rx := pad * 2.0 + tw
+	var rw := sz.x - rx - pad
+	var head := _lbl("SKIRMISH", 44, GOLD)
+	head.position = Vector2(rx, pad - 6.0)
+	card.add_child(head)
+	var sub := _lbl("TEST RANGE  -  15 v 15 AGAINST AI", 16, DIM)
+	sub.position = Vector2(rx + 2.0, pad + 54.0)
+	card.add_child(sub)
+	play_map_lbl = _lbl("", 26, INK)
+	play_map_lbl.position = Vector2(rx, 130)
+	play_map_lbl.size = Vector2(rw, 70)
+	card.add_child(play_map_lbl)
+	play_ship_lbl = _lbl("", 26, GOLD)
+	play_ship_lbl.position = Vector2(rx, 222)
+	play_ship_lbl.size = Vector2(rw, 34)
+	card.add_child(play_ship_lbl)
+	play_ship_sub = _lbl("", 17, DIM)
+	play_ship_sub.position = Vector2(rx, 260)
+	play_ship_sub.size = Vector2(rw, 30)
+	card.add_child(play_ship_sub)
+	var bm := _btn("CHANGE MAP", _show_tab.bind(2), GOLD.darkened(0.2), 18)
+	bm.position = Vector2(rx, 320)
+	bm.size = Vector2((rw - 12.0) * 0.5, 56)
+	card.add_child(bm)
+	var bs := _btn("CHANGE SHIP", _show_tab.bind(1), GOLD.darkened(0.2), 18)
+	bs.position = Vector2(rx + (rw - 12.0) * 0.5 + 12.0, 320)
+	bs.size = Vector2((rw - 12.0) * 0.5, 56)
+	card.add_child(bs)
+	var go := _primary(_btn("LAUNCH BATTLE", _launch, Color(0.4, 0.9, 0.5), 32), Color("4ade80"))
+	go.position = Vector2(rx, sz.y - pad - 150.0)
+	go.size = Vector2(rw, 110)
+	card.add_child(go)
+	var note := _lbl("ESC returns to this menu during battle.", 14, DIM)
+	note.position = Vector2(rx, sz.y - pad - 28.0)
+	card.add_child(note)
+	return card
 
 
 func _refresh_selection() -> void:

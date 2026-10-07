@@ -99,7 +99,11 @@ func _process(delta: float) -> void:
 		# Shown while not fullscreen (to enter); hidden when fullscreen so it never clutters the game.
 		_fs_button.visible = not is_fullscreen() and not _overlay.visible
 		# Top bar, just right of centre: clear of the menu tabs and the battle compass strip.
-		_fs_button.position = Vector2(get_viewport().get_visible_rect().size.x * 0.5 + 380.0, 8.0)
+		var cs := get_tree().current_scene
+		if cs != null and cs.has_method("fullscreen_button_pos"):
+			_fs_button.position = cs.fullscreen_button_pos()
+		else:
+			_fs_button.position = Vector2(get_viewport().get_visible_rect().size.x * 0.5 + 380.0, 8.0)
 
 
 func _input(e: InputEvent) -> void:
